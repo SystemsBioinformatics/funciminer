@@ -10,5 +10,8 @@ This folder contains accession number for the species from kefir community and a
 # Post_processed_data
 This folder contains most of the produces table generated for the analysis
 
+# Publication_plots
+This folder contains all the plots present in the publication
+
 # Skin_experiment 
 This folder contains information from the experiment performed with grape must and grape skins
