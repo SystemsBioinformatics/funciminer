@@ -1,0 +1,35 @@
+kefir_mod<-read_data("/home/chrats/Desktop/From_genome_to_functions/from_genomes_to_function/data/ko_tables/kefir/modules_binary_actual_names.csv")
+kefir_mod
+
+library(KEGGREST)
+b<-keggGet("map01230")
+mod<-b[[1]]$MODULE
+kefir_mod_aa<-kefir_mod[,which(colnames(kefir_mod)%in%names(mod))]
+
+
+library(apcluster)
+apres1<-apcluster(corSimMat(),kefir_mod_aa,q=0.9)
+aggres2 <- aggExCluster(x=apres1)
+plot(aggres2)
+apres1<-apclusterK(corSimMat(),kefir_mod_aa,K=10)
+heatmap(apres1,col=terrain.colors(12),dendScale=1,main="",cexRow=1.3,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+
+
+library("lattice", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.3")
+
+
+
+library(KEGGREST)
+datat<-kefir_mod_aa
+templist<-list()
+for (j in 1:length(colnames(datat))){
+  templist[[j]]<-keggGet(colnames(datat)[j])
+}
+pathwaynames<-lapply(templist, function(x) x[[1]]$NAME)
+
+
+colnames(datat)<-unlist(pathwaynames)
+
+
+levelplot (datat[unlist(apres1@clusters),], xlab="Species",ylab="Biosynthesis of AA",main="" ,col.regions = colorRampPalette(c("lightblue", "black")), aspect = "fill",scale=list(y=list(cex=1),x=list(cex=1.5,rot=45)))
+

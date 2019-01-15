@@ -1,0 +1,323 @@
+#set path to emirge output fasta files
+setwd("/home/chrats/Desktop/Biom_wine/All/")
+
+flist <- list.files(pattern = "*.fa")
+library(ShortRead)
+library(stringr)
+library(phyloseq)
+
+
+new<-ShortRead()
+ident<-c()
+abu<-c()
+for (i in flist){
+  t<-readFasta(paste(getwd(),i,sep="/"))
+  temp<-str_replace(str_replace(i,"Sample_TOG_","+"),".fa","")
+  text<-gsub("* P", paste(temp," %P",sep = ""),id(t))
+  t@id<-BStringSet(text)
+  
+  abu<-c(abu,as.numeric(gsub(".*NormPrior=", "",id(t))))
+  
+  ident<-c(ident,gsub(" %P.*","",text))
+  new@sread<-c(new@sread,t@sread)
+  new@id<-c(new@id,t@id)
+}
+abu_mapper<-cbind(ident,abu)
+
+id<-order(width(new@sread),decreasing = T)
+fnew<-new[id]
+abu_mapper<-abu_mapper[id,]
+
+
+#run uchime then uclus then sort and give that as input
+#### create biom
+ALL_merged_uclust_sorted <- read.delim("~/Desktop/Biom_wine/All/temp/ALL_merged_uclust_sorted_097.uc", header=FALSE, comment.char="#")
+
+samples<-c()
+abu_v<-c()
+tempsplit<-strsplit(as.character(ALL_merged_uclust_sorted$V9),"[+]")
+for (i in 1:length(tempsplit)){
+  samples[i]<-tempsplit[[i]][2]
+  temp<-which(abu_mapper[,1]==ALL_merged_uclust_sorted$V9[i])
+  abu_v[i]<-abu_mapper[temp,2]
+}
+ALL_merged_uclust_sorted<-cbind(ALL_merged_uclust_sorted,abu_v,samples)
+sampelsU<-unique(samples)
+ALL_merged_uclust_sorted_r<-ALL_merged_uclust_sorted[-which(ALL_merged_uclust_sorted$V1=="C"),]
+ALL_merged_uclust_sorted_r$V2<-ALL_merged_uclust_sorted_r$V2+1
+#reorder samples
+sampelsU<-c("7PVA_B5_0"  ,"7PVA_B5_1",   "7PVA_B5_3"  , "7PVA_B5_4" ,"7PVA_B5_5",   "7PVA_B5_6"   
+            , "7PVA_B5_7" ,  "7PVA_B7_0","7PVA_B7_1"  ,   "7PVA_B7_2" , "7PVA_B7_3" , "7PVA_B7_4"
+            ,"7PVA_B7_5_" , "7PVA_B7_6" ,   "7PVA_B7_7" , "7PVA_B8_1"    , "7PVA_B8_2"   ,  "7PVA_B8_3"            
+            , "7PVA_B8_4"  ,    "7PVA_B8_5", "7PVA_B8_6"   ,  "7PVA_B8_7" 
+            , "KNQR_Bobal_Finished_Inoc" ,"KNQR_Bobal_Finished_CTRL","THLR_T1_0" ,  "THLR_T1_2", "THLR_T1_3"  , "THLR_T1_4"    , "THLR_T1_5", "THLR_T1_6"  ,   "THLR_T1_7"   ,  "THLR_T1_8",
+            "THLR_T3_0"  ,  "THLR_T3_1"   ,    "THLR_T3_2"  , "THLR_T3_3"   , "THLR_T3_5"    ,  "THLR_T3_6"     ,   "THLR_T3_8" ,        
+            "THLR_T4_0" , "THLR_T4_1"  ,  "THLR_T4_2"  ,  "THLR_T4_3"   ,  "THLR_T4_4" ,   "THLR_T4_5"  ,    "THLR_T4_6"   ,   
+            "THLR_T4_7"  ,   "THLR_T4_8" ,"KNQR_Tempranillo_Finished_Inoc","KNQR_Tempranillo_Finished_CTRL",
+            "VECX_9_0" ,"VECX_A9_0","VECX_A9_1","VECX_A9_2","VECX_A9_3"  , "VECX_A9_4", "VECX_A9_5", "VECX_A9_6",
+            "VECX_A11_0", "VECX_A11_1", "VECX_A11_2" ,  "VECX_A11_3", "VECX_A11_4",  "VECX_A11_5","VECX_A11_6", 
+            "VECX_A12_0" ,"VECX_A12_1" ,"VECX_A12_2" ,"VECX_A12_3" , "VECX_A12_4"  ,"VECX_A12_5" ,"VECX_A12_6","KNQR_Airen_Finished_Inoc" ,"KNQR_Airen_Finished_CTRL" )
+
+
+length(unique(ALL_merged_uclust_sorted_r$V2))
+Biom<-matrix(nrow=length(unique(ALL_merged_uclust_sorted_r$V2)),ncol=length(sampelsU),0)
+colnames(Biom)<-sampelsU
+rownames(Biom)<-as.character(ALL_merged_uclust_sorted_r$V9[which(ALL_merged_uclust_sorted_r$V1=="S")])
+
+
+for (i in 1:nrow(Biom)){
+  temp<-which(ALL_merged_uclust_sorted_r$V2==i)
+  temp_data<-ALL_merged_uclust_sorted_r[temp,]
+  for(j in 1:nrow(temp_data)){
+    temp_id<-which(colnames(Biom)==temp_data$samples[j])
+    Biom[i,temp_id]<-Biom[i,temp_id]+as.numeric(as.character(temp_data$abu_v[j]))
+  }
+}
+
+#normalization
+Biom1<-apply(Biom, 2, function(i) i/sum(i))
+All_otu<-otu_table(Biom1,as.logical(1))
+
+############################create refseq###################################
+library(Biostrings,quietly=T)
+rs <- readBStringSet("/home/chrats/Desktop/Biom_wine/All/temp/ALL_merged_final.fasta")
+subsel<-c()
+for (i in 1:length(rownames(Biom))){
+  ind<-which(names(rs)== rownames(Biom)[i])
+  subsel<-c(subsel,ind)
+}
+RS<-rs[subsel]
+#sina online tool max 1000.
+RS_part1<-RS[1:900]
+RS_part2<-RS[901:length(RS)]
+writeXStringSet(RS,"temp/ALL_merged_final_clustered.fasta")
+writeXStringSet(RS_part1,"temp/ALL_merged_final_clustered_part1.fasta")
+writeXStringSet(RS_part2,"temp/ALL_merged_final_clustered_part2.fasta")
+#
+All_biom@refseq<-RS
+#run sina taxonomy
+############################create taxa sina###################################
+
+taxa1 <- read.csv("~/Desktop/Biom_wine/All/temp/part1.csv", sep=";")
+taxa2 <- read.csv("~/Desktop/Biom_wine/All/temp/part2.csv", sep=";")
+taxa<-rbind(taxa1,taxa2)
+
+temp_taxa1<-strsplit(as.character(taxa$lca_tax_slv),";")
+
+n.obs <- sapply(temp_taxa1, length)
+seq.max <- seq_len(max(n.obs))
+mat <- t(sapply(temp_taxa1, "[", i = seq.max))
+
+rownames(mat)<-as.character(taxa$sequence_identifier)
+
+data(GlobalPatterns)
+tax_names<-colnames(GlobalPatterns@tax_table)
+
+All_tax<-tax_table(as.matrix(mat))
+
+############################create taxa rdf###################################
+
+###########################################
+All_biom<-phyloseq(All_otu,All_tax)
+
+############################create sam_data###################################
+sm<-matrix(nrow =ncol(All_biom@otu_table),ncol=4, NA)
+
+#variety
+sm[grep("7PVA_B*",colnames(All_biom@otu_table)),1]<-"Bobal"
+sm[grep("*_Bobal_B*",colnames(All_biom@otu_table)),1]<-"Bobal"
+sm[grep("VECX_A*",colnames(All_biom@otu_table)),1]<-"Airen"
+sm[grep("*_Airen_A*",colnames(All_biom@otu_table)),1]<-"Airen"
+sm[grep("THLR_T*",colnames(All_biom@otu_table)),1]<-"Tempranillo"
+sm[grep("*_Tempranillo_T*",colnames(All_biom@otu_table)),1]<-"Tempranillo"
+#state
+sm[grep("*[[:upper:][:digit:]]_[[:digit:]]",colnames(All_biom@otu_table)),2]<-"Tank_ferm"
+sm[grep("*_0",colnames(All_biom@otu_table)),2]<-"must"
+sm[grep("*_Finished_*",colnames(All_biom@otu_table)),2]<-"Bottle"
+sm[grep("*_[[:digit:]]_[[:digit:]]",colnames(All_biom@otu_table)),2]<-"Grape"
+#mod
+char_ind<-"a_ind"
+cont1<-"control1"
+cont2<-"control2"
+sm[grep("*_[[:upper:]]5_[[:digit:]]",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("*_[[:upper:]]7_[[:digit:]]",colnames(All_biom@otu_table)),3]<-cont1
+sm[grep("*_[[:upper:]]8_[[:digit:]]",colnames(All_biom@otu_table)),3]<-cont2
+sm[grep("*_[[:upper:]]1_[[:digit:]]",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("*_[[:upper:]]3_[[:digit:]]",colnames(All_biom@otu_table)),3]<-cont1
+sm[grep("*_[[:upper:]]4_[[:digit:]]",colnames(All_biom@otu_table)),3]<-cont2
+sm[grep("*_[[:upper:]]9_[[:digit:]]",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("*_[[:upper:]]11_[[:digit:]]",colnames(All_biom@otu_table)),3]<-cont1
+sm[grep("*_[[:upper:]]12_[[:digit:]]",colnames(All_biom@otu_table)),3]<-cont2
+
+sm[grep("*_Bobal_Finished_Inoc",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("*Bobal_Finished_CTRL",colnames(All_biom@otu_table)),3]<-cont1
+sm[grep("*_Airen_Finished_Inoc",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("VECX_9_0",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("*Airen_Finished_CTRL",colnames(All_biom@otu_table)),3]<-cont1
+sm[grep("*_Tempranillo_Finished_Inoc",colnames(All_biom@otu_table)),3]<-char_ind
+sm[grep("*Tempranillo_Finished_CTRL",colnames(All_biom@otu_table)),3]<-cont1
+
+sm[grep("*_[[:upper:]]5_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"4"
+sm[grep("*_[[:upper:]]7_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"5"
+sm[grep("*_[[:upper:]]8_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"6"
+sm[grep("*_[[:upper:]]1_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"1"
+sm[grep("*_[[:upper:]]3_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"2"
+sm[grep("*_[[:upper:]]4_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"3"
+sm[grep("*_[[:upper:]]9_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"7"
+sm[grep("*_[[:upper:]]11_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"8"
+sm[grep("*_[[:upper:]]12_[[:digit:]]",colnames(All_biom@otu_table)),4]<-"9"
+
+sm[grep("*_Bobal_Finished_Inoc",colnames(All_biom@otu_table)),4]<-"4"
+sm[grep("*Bobal_Finished_CTRL",colnames(All_biom@otu_table)),4]<-"5"
+sm[grep("*_Airen_Finished_Inoc",colnames(All_biom@otu_table)),4]<-"7"
+sm[grep("VECX_9_0",colnames(All_biom@otu_table)),4]<-"7"
+sm[grep("*Airen_Finished_CTRL",colnames(All_biom@otu_table)),4]<-"8"
+sm[grep("*_Tempranillo_Finished_Inoc",colnames(All_biom@otu_table)),4]<-"1"
+sm[grep("*Tempranillo_Finished_CTRL",colnames(All_biom@otu_table)),4]<-"2"
+
+
+smf<-cbind(colnames(All_biom@otu_table),sm)
+colnames(smf)<-c("X.SampleID","variety","state","mod","tank")
+rownames(smf)<-colnames(All_biom@otu_table)
+All_biom@sam_data<-sample_data(as.data.frame(smf))
+
+
+###############################################END#######################################################
+
+data_Tempranillo = subset_samples(All_biom, variety == "Tempranillo")
+data_Tempranillo = prune_taxa(taxa_sums(data_Tempranillo) > 0, data_Tempranillo)
+data_Bobal = subset_samples(All_biom, variety == "Bobal")
+data_Bobal = prune_taxa(taxa_sums(data_Bobal) > 0, data_Bobal)
+data_Airen = subset_samples(All_biom, variety == "Airen")
+data_Airen = prune_taxa(taxa_sums(data_Airen) > 0, data_Airen)
+
+
+
+################# bobal otu
+D<-data_Bobal@otu_table
+testx<-apply(D,2,function(x) length(which(x>0)))
+bobal_t5<-c(testx[1:7],testx[23])
+bobal_t7<-c(testx[8:15],testx[24])
+bobal_t8<-testx[16:22]
+bobal_t5<-append(bobal_t5, NA, after =2) 
+names(bobal_t5)[3]<-"7PVA_B5_2"
+names(bobal_t5)[9]<-"Bottle_B5"
+names(bobal_t7)[9]<-"Bottle_B7"
+bobal_t8<-append(bobal_t8, NA, after =0) 
+bobal_t8<-append(bobal_t8, NA, after =8) 
+names(bobal_t8)[1]<-"7PVA_B8_0"
+names(bobal_t8)[9]<-"Bottle_B8"
+
+mar.default <- c(5,4,4,2) + 0.1
+par(mar = mar.default + c(0, 4, 0, 0)) 
+plot(bobal_t5,  xaxt='n',type="b" ,ylab="Count", xlab="", main=paste("OTU's","Bobal variety",sep=" "),col="red",cex=1.5,lwd=3,cex.lab=2,cex.main=2)
+text(bobal_t5,as.character(bobal_t5),pos=4,cex=1)
+points(bobal_t7,col="blue",cex=1.5,lwd=3)
+lines(bobal_t7,col="blue",lwd=3)
+text(bobal_t7,as.character(bobal_t7),pos=4,cex=1)
+points(bobal_t8,col="green",cex=1.5,lwd=3)
+lines(bobal_t8,col="green",lwd=3)
+text(bobal_t8,as.character(bobal_t8),pos=4,cex=1)
+grid(5)
+name_vector<-c("Must","Day 1","Day 2","Day 3","Day 4","Day 5","Day 6","Day 7","Bottle")
+text(seq(1, length(bobal_t7), by=1), -5, labels = name_vector, srt = 85, pos = 1, xpd = TRUE,cex=1.5,col="Black")
+legend("topright",legend = c("L.plantarum","Control 1","Control 2"),col=c("red","blue","green"),pch = 19,cex = 1.5,bg="transparent",pch.)
+
+###################### tempr otu
+
+
+D<-data_Tempranillo@otu_table
+testx<-apply(D,2,function(x) length(which(x>0)))
+Temp_t1<-c(testx[1:8],testx[25])
+Temp_t3<-c(testx[9:15],testx[26])
+Temp_t4<-testx[16:24]
+Temp_t1<-append(Temp_t1, NA, after =1) 
+Temp_t3<-append(Temp_t3, NA, after =4) 
+Temp_t3<-append(Temp_t3, NA, after =6) 
+Temp_t4<-append(Temp_t4, NA, after =9) 
+
+
+
+plot(Temp_t1,  xaxt='n',type="b" ,ylab="Count", xlab="", main=paste("OTU's","Tempranillo variety",sep=" "),col="red",cex=1.5,lwd=3,cex.lab=2,cex.main=2)
+text(Temp_t1,as.character(Temp_t1),pos=4,cex=1)
+points(Temp_t3,col="blue",cex=1.5,lwd=3)
+lines(Temp_t3,col="blue",lwd=3)
+text(Temp_t3,as.character(Temp_t3),pos=4,cex=1)
+points(Temp_t4,col="green",cex=1.5,lwd=3)
+lines(Temp_t4,col="green",lwd=3)
+text(Temp_t4,as.character(Temp_t4),pos=4,cex=1)
+grid(5)
+name_vector<-c("Must","Day 1","Day 2","Day 3","Day 4","Day 5","Day 6","Day 7","Day 8","Bottle")
+text(seq(1, length(Temp_t3), by=1), -5, labels = name_vector, srt = 85, pos = 1, xpd = TRUE,cex=1.5,col="Black")
+legend("topright",legend = c("L.plantarum inoculation","Control 1","Control 2"),col=c("red","blue","green"),pch = 19,cex = 1.5,bg="transparent")
+
+######################Airen otu
+D<-data_Airen@otu_table
+testx<-apply(D,2,function(x) length(which(x>0)))
+Airen_t9<-c(testx[1:8],testx[23])
+Airen_t11<-c(testx[9:15],testx[24])
+Airen_t12<-testx[16:22]
+Airen_t11<-append(Airen_t11, NA, after =0) 
+Airen_t12<-append(Airen_t12, NA, after =0) 
+Airen_t12<-append(Airen_t12, NA, after =8) 
+
+plot(Airen_t9,  xaxt='n',type="b" ,ylab="Count", xlab="", main=paste("OTU's","Airen variety",sep=" "),col="red",cex=1.5,lwd=3,cex.lab=2,cex.main=2,ylim=c(min(testx),max(testx)))
+text(Airen_t9,as.character(Airen_t9),pos=4,cex=1)
+points(Airen_t11,col="blue",cex=1.5,lwd=3)
+lines(Airen_t11,col="blue",lwd=3)
+text(Airen_t11,as.character(Airen_t11),pos=4,cex=1)
+points(Airen_t12,col="green",cex=1.5,lwd=3)
+lines(Airen_t12,col="green",lwd=3)
+text(Airen_t12,as.character(Airen_t12),pos=4,cex=1)
+grid(5)
+name_vector<-c("Grape","Must","Day 1","Day 2","Day 3","Day 4","Day 5","Day 6","Bottle")
+text(seq(1, length(Airen_t11), by=1), 2.5, labels = name_vector, srt = 85, pos = 1, xpd = TRUE,cex=1.5,col="Black")
+legend("topright",legend = c("L.plantarum inoculation","Control 1","Control 2"),col=c("red","blue","green"),pch = 19,cex = 1.5,bg="transparent")
+
+#run winereoport
+
+
+#########dm for inaclulation tank
+index<- as.character(All_biom@tax_table[,10]!="Magnoliophyta")
+
+All_biomnom=prune_taxa(as.logical(All_biom@tax_table[,10]!="Magnoliophyta"),All_biom)
+All_biomnomc=prune_taxa(as.logical(All_biomnom@tax_table[,3]!="Chloroplast"),All_biomnom)
+
+All_biom_noc=prune_taxa(as.logical(All_biomnomc@tax_table[,3]!="Chloroplast"),All_biomnomc)
+All_biom_noc = prune_taxa(taxa_sums(All_biom_noc) > 0, All_biom_noc)
+All_biom_nocf=prune_samples(as.logical(All_biom_noc@sam_data[,4]=="a_ind"),All_biom_noc)
+All_biom_nocf=prune_samples(as.logical(All_biom_noc@sam_data[,4]=="L.Plantarum"),All_biom_noc)
+
+All_biom_temp=prune_taxa(as.logical(All_biom@tax_table[,3]!="Chloroplast"),All_biom)
+All_biom_control1=prune_samples(as.logical(All_biom_temp@sam_data[,4]=="control1"),All_biom_temp)
+
+All_biom_temp=prune_taxa(as.logical(All_biom@tax_table[,3]!="Chloroplast"),All_biom)
+All_biom_control2=prune_samples(as.logical(All_biom_temp@sam_data[,4]=="control2"),All_biom_temp)
+
+
+All_biom_d<- ordinate(All_biom,"NMDS","bray")
+p5 = plot_ordination(All_biom, All_biom_d, type = "samples", color = "variety",shape = "state", title = "All samples NMDS bray")+geom_point(size = 5,alpha=0.9)
+
+All_biom_lp=prune_samples(as.logical(All_biom@sam_data[,4]=="L.Plantarum"),All_biom)
+All_biom_lp_d<- ordinate(All_biom_lp,"NMDS","bray")
+p6 = plot_ordination(All_biom_lp, All_biom_lp_d, type = "samples", color = "variety",shape = "state", title = "L.planarum samples NMDS bray")+geom_point(size = 5,alpha=0.9)
+
+temp<-as.logical(All_biom@sam_data[,4]==c("control1"))
+temp1<-  which(as.logical(All_biom@sam_data[,4]==c("control2"))==T) 
+All_biom_nlp=prune_samples(temp,All_biom)
+All_biom_nlp_d<- ordinate(All_biom_nlp,"NMDS","bray")
+p7 = plot_ordination(All_biom_nlp, All_biom_nlp_d, type = "samples", color = "variety",shape = "state", title = "Control samples NMDS bray")+geom_point(size = 5,alpha=0.9)
+
+library(apcluster)
+
+mat<-as.matrix(All_biom@otu_table)
+colnames(mat)<-clean_wine_wnames(colnames(mat))
+apres1<-apcluster(corSimMat(),t(mat),q=0.9)
+aggres2 <- aggExCluster(x=apres1)
+plot(aggres2)
+apres1<-apclusterK(corSimMat(),t(mat),K=6)
+
+heatmap(apres1,col=terrain.colors(12),dendScale=.3,main=paste("OTU clustering"),cexRow=0.9,cexCol=0.9,Colv=NA,legend="col")
+#species
+
+

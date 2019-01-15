@@ -1,0 +1,170 @@
+library(Biostrings)
+isolate<-readAAStringSet("/home/chrats/Desktop/plantarum_isolate/lbp_orfs.faa")
+metagenome<-readAAStringSet("/multimeta-data/cmn204/THLR_Tempranillo_maxbin_input/Sample_TOG_THLR_T3_1.fa_folder/THLR_T3_1.faa")
+#
+read <- read.table("~/Desktop/plantarum_isolate/lbp_ko_raw.txt",sep="\t", header=FALSE, fill = TRUE)
+namestorm<-unique(as.character(read[[1]][which(as.character(read[[2]])!="")]))
+isolate<-isolate[gsub(" #.*","",names(isolate))%in%namestorm]
+#
+metagenome_ko <- read.table("/multimeta-data/cmn204/THLR_Tempranillo_maxbin_input/Sample_TOG_THLR_T3_1.fa_folder/THLR_T3_1_KO.txt",sep="\t", header=FALSE, fill = TRUE)
+namestorm_meta<-unique(as.character(metagenome_ko[[1]][which(as.character(metagenome_ko[[2]])!="")]))
+metagenome<-metagenome[gsub(" #.*","",names(metagenome))%in%namestorm_meta]
+#preparing data server
+
+isolate<-readAAStringSet("/multimeta-data/cmn204/plantarum_isolate/lbp_orfs.faa")
+
+#
+read <- read.table("/multimeta-data/cmn204/plantarum_isolate/lbp_ko_raw.txt",sep="\t", header=FALSE, fill = TRUE)
+namestorm<-unique(as.character(read[[1]][which(as.character(read[[2]])!="")]))
+isolate<-isolate[gsub(" #.*","",names(isolate))%in%namestorm]
+#
+metagenome<-readAAStringSet("/multimeta-data/cmn204/VECX_Airen_maxbin_input/Sample_TOG_VECX_A11_1.fa_folder/VECX_A11_1.faa")
+metagenome_kot <- read.table("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_maxbin_input/Sample_TOG_VECX_A11_1.fa_folder/VECX_A11_1_KO.txt",sep="\t", header=FALSE, fill = TRUE)
+VECX_A11_1_KO <- read.csv2("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_maxbin_input/Sample_TOG_VECX_A11_1.fa_folder/VECX_A11_1_KO.txt", header=FALSE)
+metagenome_ko1 <- read.csv2("/multimeta-data/cmn204/VECX_Airen_maxbin_input/Sample_TOG_VECX_A11_1.fa_folder/VECX_A11_1_KO.txt",,header=FALSE)
+
+le<-gsub(".*\t","",metagenome_ko1$V1[grep("\tK",as.matrix(metagenome_ko1),value=F)])
+namestorm_meta<-unique(metagenome_ko)
+metagenome<-metagenome[gsub(" #.*","",names(metagenome))%in%namestorm_meta]
+
+namestorm_meta<-unique(as.character(metagenome_ko[[1]][which(as.character(metagenome_ko[[2]])!="")]))
+metagenome<-metagenome[gsub(" #.*","",names(metagenome))%in%namestorm_meta]
+
+######################################3
+data("PAM30")
+data("BLOSUM100")
+data("BLOSUM62")
+# test1<-as.character(isolate[[1]])
+# test2<-as.character(isolate[[2]])
+
+ptm <- proc.time()
+indxtc<-c()
+#keepindent<-c()
+for (j in 1:length(isolate)){
+  test<-as.character(isolate[[j]])
+  test1<-substr(test, 1, nchar(test)-1)
+
+ temp<-which(width(metagenome)>=width(isolate[j])-10)
+ metagenome_temp<- metagenome[temp]
+ temp1<-which(width(metagenome_temp)<=10+width(isolate[j]))
+ metagenometest<-metagenome_temp[temp1]
+ # temp<-which(width(metagenome)==width(isolate[j]))
+
+ if(length(metagenometest)>0){
+   for (i in 1:length(metagenometest)){
+     
+     test2<-substr(as.character(metagenometest[[i]]), 1, nchar(as.character(metagenometest[[i]]))-1)
+     globalAligns <- pairwiseAlignment(test1, test2, substitutionMatrix = "BLOSUM100", gapOpening = -11,
+                                       gapExtension = -1, scoreOnly = FALSE, type="global")
+     indent<-pid(globalAligns)
+     # keepindent<-c(keepindent,indent)
+     if(is.numeric(indent)){
+       if(indent>=99){
+         indxtc<-c(indxtc,names(metagenometest[i]))
+       }
+     }
+    
+   }
+ }
+}
+
+temp_log<-as.character(metagenome_ko)%in%gsub(" #.*","",c(indx))
+temp_log1<-which(temp_log==T)
+metagenomeko_rm99<-metagenome_ko1[-temp_log1]
+metagenomeko_rm99n<-grep("^K",as.matrix(metagenomeko_rm99),value=TRUE)
+ko_to_mapper<-cbind(paste("genes",1:length(metagenomeko_rm99n),sep = ""),metagenomeko_rm99n)
+write.table(ko_to_mapper, "/multimeta-data/cmn204/A11_1_rm_99_KO.txt", sep="\t",quote = F,row.names = F,col.names = F)
+
+metagenomeko_rm99_diff<-metagenome_ko1[temp_log1]
+ko_to_mapper<-cbind(paste("genes",1:length(metagenomeko_rm99_diff),sep = ""),metagenomeko_rm99_diff)
+write.table(ko_to_mapper, "/home/chrats/Desktop/plantarum_isolate/test_removed/T1_1/rm_99.txt", sep="\t",quote = F,row.names = F,col.names = F)
+
+# lbp_ko<-grep("^K",as.matrix(read),value=TRUE)
+
+
+
+temp_log<-as.character(metagenome_ko[[1]])%in%gsub(" #.*","",c(indx))
+temp_log1<-which(temp_log==T)
+#metagenome_rm99<-metagenome[-temp_log1]
+
+metagenomeko_rm99<-metagenome_ko[[2]][-temp_log1]
+metagenomeko_rm991<-metagenome_ko[[1]][-temp_log1]
+cbind(metagenomeko_rm991,metagenomeko_rm99)
+metagenomeko_rm99n<-grep("^K",as.matrix(metagenomeko_rm99),value=TRUE)
+metagenomeko_rm99nu<-unique(metagenomeko_rm99n)
+
+metagenomeko_n<-grep("^K",as.matrix(metagenome_ko[[2]]),value=TRUE)
+metagenomeko_nu<-unique(metagenomeko_n)
+f<-metagenome_ko1[which((metagenome_ko1%in%metagenomeko_rm99n)==F)]
+
+
+  ko_to_mapper<-cbind(paste("genes",1:length(f),sep = ""),f)
+  write.table(ko_to_mapper, "/home/chrats/Desktop/plantarum_isolate/test_removed/T1_1/rm_99.txt", sep="\t",quote = F,row.names = F,col.names = F)
+
+
+
+metagenomer<-metagenome
+
+writeXStringSet(metagenomer, "/home/chrats/Desktop/plantarum_isolate/test_removed/A9_1/VECX_A9_1_rm_lbp.faa", append=FALSE,
+                compress=FALSE, compression_level=NA, format="fasta")
+######################################################lbp vs malolactic genes
+gene_list<-readAAStringSet("/home/chrats/Desktop/mlf_genes/mlf_prot.fa")
+metagenome<-readAAStringSet("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_maxbin_input/Sample_TOG_VECX_A11_1.fa_folder/VECX_A11_1.faa")
+metagenome<-readAAStringSet("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_maxbin_input/Sample_TOG_VECX_A9_1.fa_folder/VECX_A9_1.faa")
+
+genes_lbp<-readAAStringSet("/home/chrats/Desktop/plantarum_isolate/lbp_orfs.faa")
+data("BLOSUM100")
+
+#keepindent<-c()
+inputdata<-metagenome
+temp<-which(width(inputdata)>=round(mean(width(gene_list)))-20)
+inputdata_temp<- inputdata[temp]
+temp1<-which(width(inputdata_temp)<=20+round(mean(width(gene_list))))
+inputdata_final<-inputdata_temp[temp1]
+indxtc<-c()
+indent_f<-c()
+for (j in 1:length(gene_list)){
+  test<-as.character(gene_list[[j]])
+  test1<-substr(test, 1, nchar(test)-1)
+  
+
+    for (i in 1:length(inputdata_final)){
+      
+      test2<-substr(as.character(inputdata_final[[i]]), 1, nchar(as.character(inputdata_final[[i]]))-1)
+      globalAligns <- pairwiseAlignment(test1, test2, substitutionMatrix = "BLOSUM100", gapOpening = -11,
+                                        gapExtension = -1, scoreOnly = FALSE, type="global")
+      indent<-pid(globalAligns)
+      # keepindent<-c(keepindent,indent)
+      if(is.numeric(indent)){
+        if(indent>=60){
+          indxtc<-c(indxtc,names(inputdata_final[i]))
+          indent_f<-c(indent_f,indent)
+        }
+      }
+      
+    }
+  
+}
+f<-inputdata_final[which(names(inputdata_final)%in%indxtc==T)]
+f2<-inputdata_final[which(names(inputdata_final)%in%indxtc==T)]
+
+####################ml gene vs ml gene################
+
+perc<-c()
+for (j in 1:length(gene_list)){
+  test<-as.character(gene_list[[j]])
+  test1<-substr(test, 1, nchar(test)-1)
+  
+  indentv<-c()
+  for (i in 1:length(gene_list)){
+    
+    test2<-substr(as.character(gene_list[[i]]), 1, nchar(as.character(gene_list[[i]]))-1)
+    globalAligns <- pairwiseAlignment(test1, test2, substitutionMatrix = "BLOSUM100", gapOpening = -11,
+                                      gapExtension = -1, scoreOnly = FALSE, type="global")
+    indentv<-c(indentv,pid(globalAligns))
+    # keepindent<-c(keepindent,indent)
+  
+    
+  }
+  perc<-rbind(perc,indentv)
+}

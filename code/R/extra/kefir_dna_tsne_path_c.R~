@@ -1,0 +1,134 @@
+setwd("/home/chrats/Desktop/From_genome_to_functions/from_genomes_to_function/data/gb_fasta_files/kefir")
+library("robCompositions", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.2")
+library("Rtsne", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.2")
+library("Biostrings")
+library(rgl)
+library(evd)
+library(scatterplot3d)
+library(apcluster)
+library(gridExtra)
+library(ShortRead)
+
+
+Bacteria_isolates_R <- read.csv("~/Desktop/From_genome_to_functions/from_genomes_to_function/data/gb_fasta_files/kefir/Bacteria_isolates_R.csv")
+
+id<-gsub("_.*","",inp)
+# tax<-Bacteria_isolates_R[,3][match(id, Bacteria_isolates_R[,2])]
+# tax2<-gsub(" ", ".",tax)
+# tax1<-Bacteria_isolates_R[,4][match(id, Bacteria_isolates_R[,2])]
+
+inp <- list.files(pattern = "*dna.fasta")
+inp<-inp[-3]
+counter<-1
+bin<-c()
+names_all<-c()
+All<-DNAStringSet()
+names<-list()
+data<-list()
+counterb<-1
+
+for (input in inp){
+  data[[counterb]]<-readFasta(input)
+  bin<-c(bin,rep(counter,length(data[[counterb]])))
+  counter<-counter+1
+  All<-c(All,data[[counterb]]@sread)
+  names_all<-c(names_all,as.character(data[[counterb]]@id))
+  names[[counterb]]<-as.character(data[[counterb]]@id)
+  counterb<-counterb+1
+}
+
+ind<- duplicated(All)
+
+fivemers<-oligonucleotideFrequency(All,5,step = 1)
+fivemers<-fivemers+1
+fivemers_clr<-cenLR(fivemers)
+fivemers_clr_m <- unique(as.matrix(fivemers_clr$x.clr))
+set.seed(42) # Set a seed if you want reproducible results
+
+tsne_All_3d_U <-Rtsne(fivemers_clr_m,dims = 3, theta =0.7, perplexity =30) # Run TSNE
+tsne_All_2d_U <-Rtsne(fivemers_clr_m,dims = 2, theta =0.7, perplexity =30) # Run TSNE
+
+##########################2d and ap
+centers2<-c()
+centers3<-c()
+bin2<-bin[!ind]
+for(i in 1:length(unique(bin2)))
+{
+  print(i)
+  group<-tsne_All_2d_U$Y[which(bin2==i),]
+  
+  cent<-t(as.matrix(colMeans(group)))
+  
+  centers2<-rbind(centers2,cent)
+  group<-tsne_All_3d_U$Y[which(bin2==i),]
+  
+  cent<-t(as.matrix(colMeans(group)))
+  
+  centers3<-rbind(centers3,cent)
+  
+}
+rownames(centers2)<-id
+rownames(centers3)<-id
+library(apcluster)
+apres<-apclusterK(negDistMat(r=2),centers2,K=8)
+heatmap(apres,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+plot(apres,centers2)
+text(centers2[,1],centers2[,2], labels = id,
+     cex= 0.9, col = "black",font=2)
+###################### 3d 
+
+read_data<-function(path){
+  data <- read.csv(path)
+  rownames(data)<-data[,1]
+  data<-data[,-1]
+  data<-t(data)
+  data
+}
+
+
+kefir_pathways<-read_data("/home/chrats/Desktop/From_genome_to_functions/from_genomes_to_function/data/ko_tables/kefir/pw_count_ko_numbers.csv")
+kefir_pathways<-kefir_pathways[-24,]
+
+data<-kefir_pathways
+data<-data[,!is.na(as.character(data[nrow(data),]))]
+
+pathways_norm<-apply(rbind(data[-nrow(data),],data[nrow(data),]), MARGIN = 2, function(x) x/x[length(x)]*100)
+pathways_norm<-pathways_norm[-nrow(pathways_norm),]
+
+library(apcluster)
+apres_pathways_norm<-apclusterK(corSimMat(),pathways_norm,K=8)
+apres_pathways_nonorm<-apclusterK(corSimMat(),data[-nrow(data),],K=8)
+
+
+heatmap(apres_pathways_norm,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+heatmap(apres_pathways_nonorm,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+
+rownames(pathways_norm)[1:(nrow(pathways_norm))]<-unlist(lapply(strsplit(rownames(kefir_pathways)[-length(rownames(kefir_pathways))], split = "_"), function(x) x[length(x)]))
+
+rownames(centers3)<-id
+color<-rep(0,nrow(centers3))
+names<-c()
+for (i in 1:length(apres_pathways_nonorm@clusters)){
+  color[apres_pathways_norm@clusters[[i]]]<-i
+}
+maxColorValue=255
+col_new<-palette(c("#963bc1",
+  "#9ac413",
+  "#0076f3",
+  "#019947",
+  "#a41613",
+  "#c0ce70",
+  "#ff9ac8",
+  "#8d6900"))
+col_new<-palette(c(rgb(216,197,243, maxColorValue=255),
+                   rgb(142,184,240, maxColorValue=255),
+                   rgb(244,177,137, maxColorValue=255),
+                   rgb(90,208,218, maxColorValue=255),
+                   rgb(216,197,243, maxColorValue=255),
+                   rgb(140,197,165, maxColorValue=255),
+                   rgb(228,186,217, maxColorValue=255),
+                   rgb(176,240,210, maxColorValue=255)))
+centers3reord<-centers3[match(rownames(pathways_norm),rownames(centers3)),]
+t<-scatterplot3d(centers3reord,pch=20,color=col_new[factor(color)],cex.symbols = 5,angle = 200,xlab = "x",ylab = "y", zlab = "z", main = "kefir overview - tSNE")
+text(t$xyz.convert(centers3reord), labels = rownames(centers3reord),
+     cex= 0.7, col = "black",font=1)

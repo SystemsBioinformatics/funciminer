@@ -1,0 +1,856 @@
+from bioservices import *
+import sys
+import re
+import cbmpy as cbm
+import os
+import json
+from Bio.Blast.Applications import NcbiblastpCommandline
+from Bio.Blast import NCBIXML
+import copy
+
+
+def remove_empty_dicts(my_dict):
+
+    """
+    Removes recursively all empty dictionaries from a dictionary of dictionaries
+    :param my_dict: a dictionary of dictionaries; in this version, it should not contain lists
+    :return: dictionary which does not contain any empty dictionaries
+
+    example:
+    d = {'R1': {'K1': {'g1': 'abc', 'g2': 'foo'}, 'K2': {}}, 'R2': {'K3': {'g3': 'bar', 'g4': 'xyz'}}, 'R3': {}}
+    remove_empty_dicts(d)
+    {'R1': {'K1': {'g1': 'abc', 'g2': 'foo'}},
+    'R2': {'K3': {'g3': 'bar', 'g4': 'xyz'}}}
+    """
+
+    if not isinstance(my_dict, dict):
+        return my_dict
+
+    return {k: v for k, v in ((k, remove_empty_dicts(v)) for k, v in my_dict.iteritems()) if v}
+
+
+def format_sbml_id(my_string):
+
+    """
+    Replaces '-', '*', ':' by '_' in a given string
+    :param my_string: a string
+    :return: formatted string
+    """
+    return re.sub('[-*:]', '_', my_string)
+
+
+def remove_sbml_issues(my_dict):
+
+    """
+    Formats recursively all strings in a dictionary of dictionaries (which can contain lists) using format_sbml_id.
+    This includes keys used in the dictionaries
+    :param my_dict: dictionary of dictionaries (and lists)
+    :return: dictionary with formatted strings (including keys)
+    """
+
+    if not isinstance(my_dict, (dict, str, list)):
+        return my_dict
+    if isinstance(my_dict, str):
+        return format_sbml_id(my_dict)
+    if isinstance(my_dict, list):
+        return [remove_sbml_issues(xi) for xi in my_dict]
+
+    return {k: v for k, v in ((remove_sbml_issues(k), remove_sbml_issues(v)) for k, v in my_dict.iteritems())}
+
+
+def createSeqplusModelMetaIdx(fmod, oid, oclass, metadraft_lib_model):
+    """
+    Create a MetaDraft template model index file from a seqplus model file::
+
+     - *fmod* the seqplus model file e.g. 'EstherDB.xml'
+     - *oid* the model unique shortname e.g. 'edb'
+     - *class* the model category e.g. 'vu'
+     - *metadraft_lib_model* the target MetaDraft lib_model directory
+
+     'edb', 'vu', "d:\@virdrives\google\work\python\metadraft\lib_model"
+
+    """
+
+    dmod = cbm.readSBML3FBC(fmod)
+    fgb = os.path.abspath(fmod)
+    input_path, fmod = os.path.split(fgb)
+    #dmod.createGeneAssociationsFromAnnotations()
+    oclass = oclass.replace('-','')
+    oid = oid.replace('-','')
+    oid = '{}-{}'.format(oclass, oid)
+    if fmod.endswith('.xml'):
+        fmod = fmod[:-4]
+    fmod = '({})-({}).seqplus'.format(oid, fmod)
+    print(fmod)
+
+    linkDict = {}
+    linkDict[oid] = {}
+    linkDict["__idx__"] = {}
+    LD = linkDict[oid]
+    LD['genbank_in'] = fgb
+    LD['sbml_in'] = fgb
+    LD['data_path'] = input_path
+    LD['gene2reaction'] = dmod.getAllProteinGeneAssociations()
+    for g_ in LD['gene2reaction']:
+        linkDict['__idx__'][g_] = oid
+    LD['reaction2gene'] = dmod.getAllGeneProteinAssociations()
+    LD['taxon_id'] = "unknown"
+    LD['sbml_out'] = os.path.join(metadraft_lib_model, "{}.xml".format(fmod))
+    LD['sbml_out_generic'] = os.path.join(metadraft_lib_model, "{}.xml".format(fmod))
+    LD['fasta_out'] = None
+
+    Fj = open(os.path.join(input_path, '{}-link.json'.format(fmod)), 'w')
+    json.dump(linkDict, Fj, indent=1, separators=(',', ': '))
+    Fj.close()
+
+    cbm.writeSBML3FBC(dmod, os.path.join(input_path, fmod+'.xml'), add_cbmpy_annot=True, add_cobra_annot=False,
+                      add_groups=False)
+
+
+def get_map_reaction_ids(map_id, kegg_con, keep_reactions=None):
+
+    """
+    Get all the reactions associated with a KEGG pathway map.
+    :param map_id: Kegg pathway map, string
+    :param kegg_con: the bioservices connector to KEGG, e.g. kegg_con = KEGG()
+    :param keep_reactions: a list or set of KEGG reaction IDs which should be kept
+    :return: a dictionary. key is the map_id and value is a list of KEGG reaction IDs
+    """
+
+    pw_rea_ids = [str(reai.split('\t')[1].partition(':')[-1]) for reai in kegg_con.link('reaction', map_id).split("\n")
+                  if reai != '']
+
+    pw_rea_dict = {}
+
+    # only reactions contained in keep_reactions are returned
+    if keep_reactions is not None:
+        # keep_reactions has to be a list or set with strings
+        if isinstance(keep_reactions, (list, set)):
+            # faster but less readable: not any(not isinstance(si, str) for si in keep_reactions):
+            if all(isinstance(si, str) for si in keep_reactions):
+                pw_rea_dict[map_id] = [reai for reai in pw_rea_ids if reai in keep_reactions]
+                return pw_rea_dict
+            else:
+                raise TypeError("keep_reactions should be a list or a set containing strings!")
+        else:
+            raise TypeError("keep_reactions should be a list or a set containing strings!")
+
+    # if keep_reactions does not exist, return all reactions of the pathway
+    pw_rea_dict[map_id] = pw_rea_ids
+    return pw_rea_dict
+
+
+def get_org_ids(kegg_con, org_names=None, org_category=None):
+
+    """
+    Returns a set of KEGG's organism identifiers given names of organisms (e.g. ['lactobacillus'] or their category,
+    e.g. ['Firmicutes']. Input is not case-sensitive.
+    TODO: don't violate DRY; check KEGG output again (org_category's entries positions)
+    :param kegg_con: the bioservices connector to KEGG, e.g. kegg_con = KEGG()
+    :param org_names: a list or set or organism names, ['lactobacillus']
+    :param org_category: a list or set of categories, e.g. ['Firmicutes']
+    :return: a set of kegg identifiers for the specified names/categories. By default, all organism IDs are returned
+    """
+
+    # if no organism is specified, all organism IDs are returned
+    if org_names is None and org_category is None:
+            return set([str(oi) for oi in s.organismIds])
+
+    target_ids = set()
+    org_info = [oi.split() for oi in kegg_con.list('organism').strip().split("\n")]
+
+    if org_names is not None:
+        if isinstance(org_names, (list, set)):
+            if all(isinstance(si, str) for si in org_names):
+                org_names_low = {si.lower() for si in org_names}
+                target_ids.update([str(orgi[1]) for orgi in org_info if
+                                   any([tsi in orgi[2].lower() for tsi in org_names_low])])
+            else:
+                raise TypeError("org_names should be a list or a set containing strings!")
+        else:
+            raise TypeError("org_names should be a list or a set containing strings!")
+
+    if org_category is not None:
+        if isinstance(org_category, (list, set)):
+            if all(isinstance(si, str) for si in org_category):
+                org_category_low = {ci.lower() for ci in org_category}
+                target_ids.update([str(orgi[1]) for orgi in org_info if
+                                   any([tsi in orgi[-3].lower() for tsi in org_category_low])])
+            else:
+                raise TypeError("org_category should be a list or a set containing strings! For example ['Firmicutes']")
+        else:
+            raise TypeError("org_category should be a list or a set containing strings! For example ['Firmicutes']")
+
+    return target_ids
+
+
+def get_gene_names_for_reactions(kegg_con, pathway_rea, target_org_ids, remove_parenthesis_from_gene=True,
+                                 remove_nga_reactions=True):
+
+    if not isinstance(target_org_ids, (list, set)):
+        raise TypeError("target_org_ids should be a list or a set containing organism IDs! For example {'lac', 'sce'}")
+
+    if isinstance(target_org_ids, list):
+        if all(isinstance(si, str) for si in target_org_ids):
+
+            target_org_ids = set([oi.lower() for oi in target_org_ids])
+        else:
+            raise TypeError("target_org_ids should be a list or a set containing organism IDs as strings! "
+                            "For example {'lac', 'sce'}")
+
+    # TODO add more checks on the dictionary contents
+    if not isinstance(pathway_rea, dict):
+        raise TypeError("pathway_rea should be a dictionary")
+
+    rea_gene_mapping = {}
+    for reai in pathway_rea.values()[0]:
+
+        reai_kegg = kegg_con.parse(kegg_con.get(reai))
+        try:
+            # KOs associated with reaction
+            reai_kos = reai_kegg['ORTHOLOGY'].keys()
+
+            ko_org = {}
+            for koi in reai_kos:
+                # print koi
+                koi_info = kegg_con.parse(kegg_con.get(koi))
+
+                # filter out relevant organisms (stored in target_org_ids)
+                ko_org[str(koi)] = {str(orgi): str(genes) for orgi, genes in koi_info['GENES'].iteritems() if
+                                    orgi.lower() in target_org_ids}
+
+            rea_gene_mapping[reai] = ko_org
+
+        except KeyError:
+            try:
+                reai_enz = reai_kegg['ENZYME']
+                enz_org = {}
+                for enzi in reai_enz:
+                    enz_info = kegg_con.parse(kegg_con.get(enzi))
+
+                    try:
+                        enz_org[str(enzi)] = {str(orgi): str(genes) for orgi, genes in enz_info['GENES'].iteritems() if
+                                              orgi.lower() in target_org_ids}
+
+                    except TypeError:
+                        enz_org[str(enzi)] = {}
+
+                rea_gene_mapping[reai] = enz_org
+
+            except KeyError:
+                print reai_kegg
+
+    # remove parenthesis from gene names
+    if remove_parenthesis_from_gene:
+        for reai, koienzi in rea_gene_mapping.iteritems():
+            for koi in koienzi.values():
+                for orgi, genei in koi.iteritems():
+                    koi[orgi] = str(re.sub(r'\(.*\)', '', genei))
+
+    if remove_nga_reactions:
+        return remove_empty_dicts(rea_gene_mapping)
+
+    return rea_gene_mapping
+
+
+def add_sequences_to_genes(kegg_con, rea_gene_mapping, connector=':', replace_existing=False):
+
+    for reai, koienzi in rea_gene_mapping.iteritems():
+        for koi, org_genes in koienzi.iteritems():
+
+            gene_seq = {}
+            for orgi, genei in org_genes.iteritems():
+                for gidi in genei.split():
+
+                    seqkey = "{}{}{}".format(orgi.lower(), connector, gidi)
+
+                    if connector == ":":
+                        gene_seq[seqkey] = re.sub(' ', '', kegg_con.parse(kegg_con.get(seqkey))['AASEQ'])
+                    else:
+                        gene_seq[seqkey] = str(re.sub(' ', '', kegg_con.parse(kegg_con.get(re.sub(connector,
+                                                                                                  ':',
+                                                                                                  seqkey)))['AASEQ']))
+            if replace_existing:
+                koienzi[koi] = gene_seq
+            else:
+                koienzi[koi].update(gene_seq)
+
+
+def create_gene_seq_dict(rea_gene_mapping, connector=":"):
+
+    """
+    Filters gene identifiers and their corresponding sequences from a dictionary created in get_gene_names_for_reactions
+    :param rea_gene_mapping: dictionary created in get_gene_names_for_reactions
+    :param connector: identifier in key that indicates that the corresponding value is a sequence
+    :return: a dictionary whose keys are gene identifiers and whose values are sequences
+    """
+
+    db_fasta_dict = {}
+    for ri in rea_gene_mapping.keys():
+        for koi, genes_org in rea_gene_mapping[ri].iteritems():
+            for geneid, seqi in genes_org.iteritems():
+                if connector in geneid:
+                    db_fasta_dict.update({geneid: seqi})
+
+    return db_fasta_dict
+
+
+def create_fasta_string_from_dict(gene_seq_dict, connector=":"):
+
+    """
+    creates a string in fasta format given a dictionary whose keys are gene identifiers and whose values are sequences
+    :param gene_seq_dict: dictionary whose keys are gene identifiers and whose values are sequences
+    :param connector: only keys that contain the connector will be used; the remaining ones are ignored
+    :return: string in fasta format
+    """
+
+    db_fasta = ''
+    for geneid, seqi in gene_seq_dict.iteritems():
+        if connector in geneid:
+            db_fasta += '{}{}\n{}\n'.format('>', geneid, seqi)
+
+    return db_fasta
+
+
+def create_blast_db_from_fasta(rea_gene_mapping, path_to_db, db_name, connector, db_type='prot'):
+
+    db_fasta_dict = create_gene_seq_dict(rea_gene_mapping, connector=connector)
+    db_fasta_string = create_fasta_string_from_dict(db_fasta_dict, connector=connector)
+
+    with open(os.path.join(path_to_db, '{}_{}'.format(db_name, '.fasta')), "w") as fn:
+        fn.write(db_fasta_string)
+
+    # creating database needed for blast
+    db_file = '{}_{}'.format(db_name, '.fasta')
+    build_db_command = '{} {} {} {} {}'.format('makeblastdb -in', os.path.join(path_to_db, db_file),
+                                               '-dbtype', db_type,
+                                               '-parse_seqids')
+    os.system(build_db_command)
+
+
+def filter_genes_by_blast(input_file, path_to_db, db_name, threshold_evalue=1e-25):
+
+    db_file = '{}_{}'.format(db_name, '.fasta')
+
+    outfile = db_file + '.out.xml'
+
+    # for otions check: https://www.ncbi.nlm.nih.gov/books/NBK279675/
+    blastp_cline = NcbiblastpCommandline(query=input_file,
+                                         db=os.path.join(path_to_db, db_file),
+                                         evalue=0.001,
+                                         num_threads=5,
+                                         outfmt=5,
+                                         out=outfile)
+
+    stdout, stderr = blastp_cline()
+
+    result_handle = open(outfile)
+    blast_records = NCBIXML.parse(result_handle)
+
+    seq_keep = set()
+    for blast_record in blast_records:
+        for alignment in blast_record.alignments:
+            for hsp in alignment.hsps:
+                if hsp.expect < threshold_evalue:
+
+                    seq_keep.add(str(re.sub('No definition line', '', alignment.title).strip()))
+
+    return seq_keep
+
+
+def filter_keys_in_dict(my_dict, keep_set):
+
+    for ri in my_dict:
+        for koi, genes_org in my_dict[ri].iteritems():
+            genes_filtered = {geneid: seqi for geneid, seqi in genes_org.iteritems() if geneid in keep_set}
+            my_dict[ri][koi] = genes_filtered
+
+    return my_dict
+
+
+def get_genes_based_on_blast_result(rea_gene_mapping, seq_keep, remove_nga_reactions=True, return_copy=True):
+
+    if return_copy:
+        rea_gene_mapping_cp = copy.deepcopy(rea_gene_mapping)
+        if remove_nga_reactions:
+            return remove_empty_dicts(filter_keys_in_dict(rea_gene_mapping_cp, seq_keep))
+        return filter_keys_in_dict(rea_gene_mapping_cp, seq_keep)
+
+    return filter_keys_in_dict(rea_gene_mapping, seq_keep)
+
+
+def get_stoichiometry_of_kegg_reaction(kegg_con, reaction_id):
+
+    """
+    Returns the stoichiometry of a KEGG reaction
+    :param kegg_con: the bioservices connector to KEGG, e.g. kegg_con = KEGG()
+    :param reaction_id: reaction ID, e.g. 'R00004'
+    :return: a list with tuples where negative/positive values represent stoichiometric factors of substrates/products
+
+    e.g.
+    get_stoichiometry_of_kegg_reaction(kegg_con, 'R00004')
+    [(-1, 'C00013'), (-1, 'C00001'), (2.0, 'C00009')]
+
+    TODO: This will crash for stoichiometric factors which are not numbers: e.g.
+    http://www.genome.jp/dbget-bin/www_bget?rn:R00001
+    """
+
+    eq = kegg_con.parse(kegg_con.get(reaction_id))['EQUATION']  # R00004 R00002
+    subs, prods = eq.split('=')
+    subs = str(re.sub('[<>]', '', subs).strip())
+    prods = str(re.sub('[<>]', '', prods).strip())
+
+    subs = [str(si.strip()) for si in subs.split('+')]
+    prods = [str(si.strip()) for si in prods.split('+')]
+
+    subs_stoich = [(float('-' + sis.split()[0]), str(sis.split()[1])) if len(sis.split()) > 1 else (-1., sis) for sis in
+                   subs]
+    prods_stoich = [(float(sis.split()[0]), str(sis.split()[1])) if len(sis.split()) > 1 else (1., sis) for sis in
+                    prods]
+
+    subs_stoich.extend(prods_stoich)
+
+    return subs_stoich
+
+
+# the map for which we want to create a template model
+target_map = 'map00400'
+path_fasta_file = '../../data/gb_fasta_files/kefir/'
+# name_fasta_file = '152_03182016.fasta'
+name_fasta_file = '322b_03182016.fasta'
+
+# the KEGG connector
+kegg_connector = KEGG()
+
+# TODO: add check whether this list is empty! e.g. 'map02060'
+pw_rea = get_map_reaction_ids(target_map, kegg_connector)
+
+# the organisms whose genes we want to incorporate into the model
+target_cat = ['Firmicutes']
+target_ids = get_org_ids(kegg_connector, org_category=target_cat)
+
+# a dictionary: keys: reaction IDs, values: dictionarys, keys: KOs, values: dictionaries: keys: organism ID, value gene ID
+rea_gene_dict = get_gene_names_for_reactions(kegg_connector, pw_rea, target_ids)
+
+# we add the AA sequence to each gene in the dictionary; ideally, the connector would be a colon but this might give problems when the model is exported to sbml
+connecting_string = '_CONN_'
+add_sequences_to_genes(kegg_connector, rea_gene_dict, connector=connecting_string)
+
+# sys.exit(0)
+# gene database we will use for Blast to get rid of genes of low similarity
+path_database = '../../data/gb_fasta_files/kefir/blast_files/'
+db_name = '{}_{}_{}_{}'.format("database", name_fasta_file, target_map, " ".join(target_cat))
+create_blast_db_from_fasta(rea_gene_dict,
+                           path_database,
+                           db_name,
+                           connector=connecting_string,
+                           db_type='prot')
+
+# our fasta file
+infile = os.path.join(path_fasta_file, name_fasta_file)
+
+# similarity cutoff value
+cutoff_evalue = 1e-25
+# genes with similarity higher than the cutoff
+genes_to_keep = filter_genes_by_blast(infile,
+                                      path_database,
+                                      db_name,
+                                      threshold_evalue=cutoff_evalue)
+
+# get all reactions with genes associated with them
+rea_gene_dict_new = get_genes_based_on_blast_result(rea_gene_dict, genes_to_keep, remove_nga_reactions=True, return_copy=True)
+
+# model creation; stoichiometry of reactions etc
+pw_reactions = {}
+
+for ri in rea_gene_dict_new:
+
+    rea_stoich = get_stoichiometry_of_kegg_reaction(kegg_connector, ri)
+    pw_reactions[ri] = {}
+    pw_reactions[ri]['id'] = str(ri)
+    pw_reactions[ri]['reversible'] = True
+    pw_reactions[ri]['SUBSYSTEM'] = 'tbd'
+    pw_reactions[ri]['reagents'] = rea_stoich
+
+    gene_asso = []
+
+    for koi, genes_org in rea_gene_dict_new[ri].iteritems():
+
+        # gene_seq_asso = [orgi for orgi in genes_org.keys() if ':' in orgi]
+        gene_seq_asso = [str(orgi) for orgi in genes_org.keys() if connecting_string in orgi]
+        koi_asso = " or ".join(gene_seq_asso)
+
+        koi_asso = '(' + koi_asso + ')'
+
+        gene_asso.append(koi_asso)
+
+        for gi in gene_seq_asso:
+            pw_reactions[ri][str('gbank_seq_' + gi)] = str(rea_gene_dict_new[ri][koi][gi])
+
+    pw_reactions[ri]['GENE_ASSOCIATION'] = str(' or '.join(gene_asso))
+
+bounds = {}
+for ri in pw_reactions:
+    bounds[ri] = {'lower': -1000., 'upper': 1000.}
+
+objective_function = {
+    'dummyObj': {'id': 'dummyObj', 'flux': pw_reactions.keys()[0],
+                 'coefficient': 1, 'sense': 'Maximize', 'active': True}
+}
+
+# all different compounds in pathway
+pw_compounds = set([str(si[1]) for ri in pw_reactions for si in pw_reactions[ri]['reagents']])
+
+pw_species = {}
+
+for si in pw_compounds:
+    pw_species[si] = {}
+    pw_species[si]['id'] = str(si)
+    pw_species[si]['boundary'] = False
+    pw_species[si]['SUBSYSTEM'] = 'tbd'
+
+    kegg_si = kegg_connector.parse(kegg_connector.get(si))
+
+    try:
+        pw_species[si]['CHEBI'] = kegg_si['DBLINKS']['ChEBI']
+    except KeyError:
+        pass
+
+    try:
+        pw_species[si]['FORMULA'] = kegg_si['FORMULA']
+    except KeyError:
+        pass
+
+    try:
+        pw_species[si]['NAME'] = " ".join([str(ni) for ni in kegg_si['NAME']])
+    except KeyError:
+        pass
+
+# replace dashes by underscores; quick fix for now
+pw_reactions = remove_sbml_issues(pw_reactions)
+
+if target_cat:
+    model_name = '{}_{}'.format(target_map, "_".join(target_cat))
+else:
+    pass
+    # TODO: add alternatives
+
+cmod = cbm.CBModelTools.quickDefaultBuild(model_name,
+                                          copy.deepcopy(pw_reactions),
+                                          copy.deepcopy(pw_species),
+                                          bounds,
+                                          objective_function)
+
+cmod.createGeneAssociationsFromAnnotations(replace_existing=True)
+
+if target_cat:
+    metadraft_mn = '{}_{}_{}{}'.format(target_map, "_".join(target_cat), name_fasta_file.rsplit('.')[0], '_NEW.xml')
+else:
+    pass
+    # TODO: add alternatives
+
+cbm.writeSBML3FBC(cmod, metadraft_mn)  # ,
+# add_cobra_annot=False, xoptions={'zip_model': False})
+
+createSeqplusModelMetaIdx(metadraft_mn,
+                          "_".join(target_cat),
+                          target_map,
+                          "/home/willi//Documents/FBA/CommunityFBA/kefir/reconstruction/metadraft/lib_model")
+
+sys.exit(0)
+# convert unicode (done also above)
+# pw_reactions = {str(k): v for k, v in pw_reactions.iteritems()}
+
+
+
+
+# # # get all lactobacilli
+#
+# # target_org = {'lactobacillus', 'lactococcus', 'bsu', 'axl', 'cput', 'cne', 'cnb'}
+# # target_org = {'all_org'}
+# target_org = ['Firmicutes']
+#
+# org_info = [x.split() for x in s.list('organism').strip().split("\n")]
+#
+# # could be done in one step but info might be required later on
+# # target_entries = [orgi for orgi in org_info if any([tsi in orgi[2].lower() for tsi in target_org]) or
+# #                   orgi[1] in target_org]  # [orgi for orgi in org_info if target_org in orgi[2].lower()]
+# # target_ids = set([str(orgi[1]) for orgi in target_entries])
+#
+# target_entries = [orgi for orgi in org_info if target_org[0] in orgi[-3]]
+# target_ids = set([str(orgi[1]) for orgi in target_entries])
+#
+# # target_ids = set([str(oi) for oi in s.organismIds])
+# # sys.exit(0)
+#
+# my_map = 'map00340'
+#
+# pw = s.link('reaction', my_map).split("\n")
+#
+# # keep_rea = {'R04035'}
+#
+# pw_rea = {}
+# pw_rea[my_map] = [str(reai.split('\t')[1].partition(':')[-1]) for reai in pw if reai != '']  # and
+#                   # str(reai.split('\t')[1].partition(':')[-1]) in keep_rea]
+#
+# # for reai in pw_rea[my_map]:
+# #     print s.parse(s.get(reai))
+# #     print '----------------------------------' + '\n\n'
+
+# sys.exit(0)
+# my_map = 'map00340'
+# rea_genes = {}
+# for reai in pw_rea[my_map]:
+#
+#     reai_kegg = s.parse(s.get(reai))
+#     try:
+#         # KOs associated with reaction
+#         reai_kos = reai_kegg['ORTHOLOGY'].keys()
+#         # print reai, reai_kos
+#         ko_org = {}
+#         for koi in reai_kos:
+#             # print koi
+#             koi_info = s.parse(s.get(koi))
+#             # filter out relevant organisms (stored in target_ids)
+#             ko_org[str(koi)] = {str(orgi): str(genes) for orgi, genes in koi_info['GENES'].iteritems() if orgi.lower() in target_ids}
+#
+#         rea_genes[reai] = ko_org
+#     except KeyError:
+#         try:
+#             reai_enz = reai_kegg['ENZYME']
+#             enz_org = {}
+#             for enzi in reai_enz:
+#                 enz_info = s.parse(s.get(enzi))
+#                 try:
+#                     enz_org[str(enzi)] = {str(orgi): str(genes) for orgi, genes in enz_info['GENES'].iteritems() if orgi.lower() in
+#                                      target_ids}
+#                 except TypeError:
+#                     enz_org[enzi] = {}
+#
+#             rea_genes[reai] = enz_org
+#         except KeyError:
+#             print reai_kegg
+#
+# rea_genes = remove_empty_dicts(rea_genes)
+# # rea_pw = remove_empty_dicts(rea_genes).keys()  # "+".join(rea_pw)  # for kegg pw illustration
+# # sys.exit()
+#
+# # remove parenthesis from gene names
+# for reai, koienzi in rea_genes.iteritems():
+#     for koi in koienzi.values():
+#         for orgi, genei in koi.iteritems():
+#             koi[orgi] = str(re.sub(r'\(.*\)', '', genei))
+#
+# # sys.exit()
+#
+# # add sequences to the respective KOs
+# for reai, koienzi in rea_genes.iteritems():
+#
+#     for koi, org_genes in koienzi.iteritems():
+#         gene_seq = {}
+#         for orgi, genei in org_genes.iteritems():
+#             for gidi in genei.split():
+#                 # seqkey = orgi.lower() + ':' + gidi
+#                 seqkey = orgi.lower() + '_CONN_' + gidi
+#                 # gene_seq[seqkey] = re.sub(' ', '', s.parse(s.get(seqkey))['AASEQ'])
+#                 gene_seq[seqkey] = str(re.sub(' ', '', s.parse(s.get(re.sub('_CONN_', ':', seqkey)))['AASEQ']))
+#
+#         koienzi[koi].update(gene_seq)
+#
+# sys.exit()
+#
+# # doing the preselection using blast
+# db_fasta_dict = {}
+# for ri in rea_genes.keys():
+#     for koi, genes_org in rea_genes[ri].iteritems():
+#         for geneid, seqi in genes_org.iteritems():
+#             if '_CONN_' in geneid:
+#                 db_fasta_dict.update({geneid: seqi})
+#
+# # creating fasta file for a given map und organisms
+# db_fasta = ''
+# for geneid, seqi in db_fasta_dict.iteritems():
+#     if '_CONN_' in geneid:
+#         db_fasta += '{}{}\n{}\n'.format('>', geneid, seqi)
+#
+# ptdb = '../../data/gb_fasta_files/kefir/blast_files/'
+# with open(os.path.join(ptdb, '{}_{}{}'.format(my_map, "_".join(target_org), '_all_seq.fasta')), "w") as fn:
+#     fn.write(db_fasta)
+#
+# # creating database needed for blast
+# dbfile = '{}_{}{}'.format(my_map, "_".join(target_org), '_all_seq.fasta')
+# db_type = 'prot'
+# build_db_command = '{} {} {} {} {}'.format('makeblastdb -in', os.path.join(ptdb, dbfile),
+#                                            '-dbtype', db_type,
+#                                            '-parse_seqids')
+# os.system(build_db_command)
+#
+# # this should be replaced by a metafile for kefir fasta file i.e. all fasta files should be concatenated
+# ptff = '../../data/gb_fasta_files/kefir/'
+# infile = os.path.join(ptff, '152_03182016.fasta')
+# # infile = os.path.join(ptff, '322b_03182016.fasta')
+# outfile = dbfile+'.out.xml'
+#
+# # for otions check: https://www.ncbi.nlm.nih.gov/books/NBK279675/
+# blastp_cline = NcbiblastpCommandline(query=infile, db=os.path.join(ptdb, dbfile), evalue=0.001, num_threads=5, outfmt=5,
+#                                      out=outfile)
+# stdout, stderr = blastp_cline()
+#
+# result_handle = open(outfile)
+# blast_records = NCBIXML.parse(result_handle)
+#
+# # sys.exit(0)
+#
+# E_VALUE_THRESH = 1e-25
+#
+# seq_keep = set()
+# for blast_record in blast_records:
+#     for alignment in blast_record.alignments:
+#         for hsp in alignment.hsps:
+#             if hsp.expect < E_VALUE_THRESH:
+#                 # print('\n\n'+'****Alignment****')
+#                 # print('sequence:', alignment.title)
+#                 # print('length:', alignment.length)
+#                 # print('e value:', hsp.expect)
+#                 # print(hsp.query[0:75] + '...')
+#                 # print(hsp.match[0:75] + '...')
+#                 # print(hsp.sbjct[0:75] + '...')
+#                 seq_keep.add(str(re.sub('No definition line', '', alignment.title).strip()))
+#
+# rea_genes_filtered = rea_genes.copy()
+# for ri in rea_genes_filtered.keys():
+#     for koi, genes_org in rea_genes_filtered[ri].iteritems():
+#         genes_filtered = {geneid: seqi for geneid, seqi in genes_org.iteritems() if geneid in seq_keep}
+#         rea_genes_filtered[ri][koi] = genes_filtered
+#
+# rea_genes_filtered = remove_empty_dicts(rea_genes_filtered)
+# sys.exit(0)
+#
+# # create reaction dictionary for model creation
+# pw_reactions = {}
+#
+# for ri in rea_genes_filtered.keys():
+#
+#     eq = s.parse(s.get(ri))['EQUATION']  # R00004 R00002
+#     subs, prods = eq.split('=')
+#     subs = str(re.sub('[<>]', '', subs).strip())
+#     prods = str(re.sub('[<>]', '', prods).strip())
+#
+#     subs = [str(si.strip()) for si in subs.split('+')]
+#     prods = [str(si.strip()) for si in prods.split('+')]
+#
+#     subs_stoich = [(float('-' + sis.split()[0]), str(sis.split()[1])) if len(sis.split()) > 1 else (-1, sis) for sis in subs]
+#     prods_stoich = [(float(sis.split()[0]), str(sis.split()[1])) if len(sis.split()) > 1 else (1, sis) for sis in prods]
+#
+#     subs_stoich.extend(prods_stoich)
+#
+#     pw_reactions[ri] = {}
+#     pw_reactions[ri]['id'] = str(ri)
+#     pw_reactions[ri]['reversible'] = True
+#     pw_reactions[ri]['SUBSYSTEM'] = 'tbd'
+#     pw_reactions[ri]['reagents'] = subs_stoich
+#
+#     gene_asso = []
+#
+#     for koi, genes_org in rea_genes_filtered[ri].iteritems():
+#
+#         # gene_seq_asso = [orgi for orgi in genes_org.keys() if ':' in orgi]
+#         gene_seq_asso = [str(orgi) for orgi in genes_org.keys() if '_CONN_' in orgi]
+#         koi_asso = " or ".join(gene_seq_asso)
+#
+#         koi_asso = '(' + koi_asso + ')'
+#
+#         gene_asso.append(koi_asso)
+#
+#         for gi in gene_seq_asso:
+#             pw_reactions[ri][str('gbank_seq_'+gi)] = str(rea_genes_filtered[ri][koi][gi])
+#
+#     pw_reactions[ri]['GENE_ASSOCIATION'] = str(' or '.join(gene_asso))
+#
+# # all different compounds in pathway
+# pw_compounds = set([str(si[1]) for ri in pw_reactions.keys() for si in pw_reactions[ri]['reagents']])
+#
+# pw_species = {}
+#
+# for si in pw_compounds:
+#     pw_species[si] = {}
+#     pw_species[si]['id'] = str(si)
+#     pw_species[si]['boundary'] = False
+#     pw_species[si]['SUBSYSTEM'] = 'tbd'
+#
+# bounds = {}
+# for ri in pw_reactions.keys():
+#     bounds[ri] = {'lower': -1000., 'upper': 1000.}
+#
+# objective_function = {
+#     'dummyObj': {'id': 'dummyObj', 'flux': pw_reactions.keys()[0],
+#                  'coefficient': 1, 'sense': 'Maximize', 'active': True}
+# }
+#
+# # convert unicode (done also above)
+# pw_reactions = {str(k): v for k, v in pw_reactions.iteritems()}
+#
+# # replace dashes by underscores; quick fix for now
+# pw_reactions = remove_sbml_issues(pw_reactions)
+#
+# cmod = cbm.CBModelTools.quickDefaultBuild('{}_{}'.format(my_map, "_".join(target_org)), pw_reactions.copy(),
+#                                           pw_species.copy(), bounds, objective_function)
+#
+# cmod.createGeneAssociationsFromAnnotations(replace_existing=True)
+#
+#
+# # for reai, anno in pw_reactions.iteritems():
+# #     cmod.createGeneProteinAssociation(reai, anno['GENE_ASSOCIATION'])
+# # sys.exit(0)
+# cbm.writeSBML3FBC(cmod, '{}_{}{}'.format(my_map, "_ns_".join(target_org), '_blast_test_all_firm.xml'))  # ,
+#                   # add_cobra_annot=False, xoptions={'zip_model': False})
+#
+# createSeqplusModelMetaIdx('{}_{}{}'.format(my_map, "_ns_".join(target_org), '_blast_test_all_firm.xml'), "_".join(target_org), my_map,
+#                           "/home/willi//Documents/FBA/CommunityFBA/kefir/reconstruction/metadraft/lib_model")
+#
+# sys.exit(0)
+#
+# for f in cmod.flux_bounds:
+#     f.setName('no name')
+#
+#
+#
+# eq = s.parse(s.get('R00004'))['EQUATION']  # R00004 R00002
+# subs, prods = eq.split('=')
+# subs = re.sub('[<>]', '', subs).strip()
+# prods = re.sub('[<>]', '', prods).strip()
+#
+# # my_url = 'http://rest.kegg.jp/link/reaction/' + my_map
+#
+# # pw = urllib2.urlopen(my_url).read().split("\n")
+# #
+# # pw_rea = {}
+# # pw_rea[my_map] = [reai.split('\t')[1].partition(':')[-1] for reai in pw if reai != '']
+#
+#
+# # pw_reactions['R03013']['GENE_ASSOCIATION'] = '(lcl_CONNECTOR_LOCK919_1387 or lli_CONNECTOR_uc509_1224 or ' \
+# #                                              'llm_CONNECTOR_llmg_1288 or lln_CONNECTOR_LLNZ_06655 or ' \
+# #                                              'llr_CONNECTOR_llh_6685 or lpz_CONNECTOR_Lp16_2034 or ' \
+# #                                              'lpq_CONNECTOR_AF91_07865 or lbh_CONNECTOR_Lbuc_0709 or ' \
+# #                                              'llt_CONNECTOR_CVCAS_1181 or lpl_CONNECTOR_lp_2563 or ' \
+# #                                              'llj_CONNECTOR_LG36_1184 or lce_CONNECTOR_LC2W_1372 or ' \
+# #                                              'lla_CONNECTOR_L37351 or lpx_CONNECTOR_ASU28_10915 or ' \
+# #                                              'lgn_CONNECTOR_ABM34_11805 or lpj_CONNECTOR_JDM1_2062 or ' \
+# #                                              'lpi_CONNECTOR_LBPG_03059 or lca_CONNECTOR_LSEI_1206 or ' \
+# #                                              'lrl_CONNECTOR_LC705_01241 or lmu_CONNECTOR_LBLM1_07630 or ' \
+# #                                              'lcb_CONNECTOR_LCABL_14250 or lfr_CONNECTOR_LC40_0510 or ' \
+# #                                              'lbn_CONNECTOR_LBUCD034_0755 or llk_CONNECTOR_LLKF_1258 or ' \
+# #                                              'lfe_CONNECTOR_LAF_0754 or lcx_CONNECTOR_LCA12A_1421 or' \
+# #                                              ' lrh_CONNECTOR_LGG_01223 or llx_CONNECTOR_NCDO2118_1226 or ' \
+# #                                              'llw_CONNECTOR_kw2_1177 or lrm_CONNECTOR_LRC_06590 or ' \
+# #                                              'lcz_CONNECTOR_LCAZH_2939 or lcw_CONNECTOR_BN194_14010 or ' \
+# #                                              'lro_CONNECTOR_LOCK900_1189 or lpb_CONNECTOR_SH83_10880 or ' \
+# #                                              'lgn_CONNECTOR_ABM34_09385 or lpk_CONNECTOR_LACPI_1671 or ' \
+# #                                              'lff_CONNECTOR_LBFF_0777 or lrc_CONNECTOR_LOCK908_1275 or ' \
+# #                                              'lpr_CONNECTOR_LBP_cg2109 or lpt_CONNECTOR_zj316_2485 or ' \
+# #                                              'lho_CONNECTOR_LOOC260_121560 or ' \
+# #                                              'llc_CONNECTOR_LACR_1325 or lld_CONNECTOR_P620_06910 or ' \
+# #                                              'lra_CONNECTOR_LRHK_1216 or lcs_CONNECTOR_LCBD_1404 or ' \
+# #                                              'lls_CONNECTOR_lilo_1105 or lrg_CONNECTOR_LRHM_1169 or ' \
+# #                                              'lps_CONNECTOR_LPST_C2112)'
+#

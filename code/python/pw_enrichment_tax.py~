@@ -1,0 +1,153 @@
+import pandas as pd
+from bioservices import *
+import re
+import sys
+import seaborn as sns
+import matplotlib.pyplot as plt
+import itertools
+import numpy as np
+from collections import Counter
+
+
+def split_and_count(ser, col_name, delimiter=" "):
+
+    # connect all strings and take care of NAs
+    temp_s = delimiter.join([si for si in ser.values if isinstance(si, (str, unicode))])
+
+    # split string which prepares for counting occurrences
+    temp_l = temp_s.split()
+
+    return pd.DataFrame(Counter(temp_l), index=[col_name]).transpose()
+
+
+def get_ko_info_single_ko(kegg_con, ko_id):
+
+    ko_entry = kegg_con.parse(kegg_con.get(ko_id))
+
+    try:
+        ko_pw = " ".join(ko_entry['PATHWAY'].keys())
+    except (KeyError, TypeError):
+        ko_pw = np.nan
+
+    return ko_pw
+
+
+def map_pw_ko(kegg_con, ko_df_org):
+
+    ko_df = ko_df_org.copy()
+    ko_df['KO_id'] = [indi.split('_')[0] for indi in ko_df.index]
+    ko_df['pathways'] = ko_df['KO_id'].map(dict(zip(ko_df['KO_id'].unique(),
+                                                    [get_ko_info_single_ko(kegg_con, koi) for
+                                                     koi in ko_df['KO_id'].unique()])))
+
+    return ko_df
+
+
+def get_ko_number_single_pw(kegg_con, pw_id):
+
+    try:
+        n_kos = len(kegg_con.parse(kegg_con.get(pw_id))['ORTHOLOGY'].keys())
+    except (KeyError, TypeError):
+
+        try:
+            modules = kegg_con.parse(kegg_con.get(pw_id))['MODULE'].keys()
+            print modules
+            kos_pathw = set()
+            for modi in modules:
+                defi = kegg_con.parse(kegg_con.get(modi))['DEFINITION']
+                kos_pathw.update(set(re.findall(r'[K]\d{5}', defi)))
+            n_kos = len(kos_pathw)
+        except (KeyError, TypeError):
+
+            n_kos = np.nan
+
+    return n_kos
+
+
+def get_number_kos_pw(kegg_con, pw_count_df_org):
+
+    pw_count_df = pw_count_df_org.copy()
+    pw_count_df['pw_id'] = [indi.split('_')[0] for indi in pw_count_df.index]
+    pw_count_df['number_kos'] = pw_count_df['pw_id'].map(dict(zip(pw_count_df['pw_id'].unique(),
+                                                                  [get_ko_number_single_pw(kegg_con, pw_idi) for
+                                                                   pw_idi in pw_count_df['pw_id'].unique()])))
+
+    return pw_count_df
+
+
+def get_ko_info(kegg_con, ko_df):
+
+    ko_pw_rea = ko_df.copy()
+
+    for koi in ko_pw_rea.index:
+
+        ko_entry = kegg_con.parse(kegg_con.get(koi))
+
+        try:
+            ko_pw_rea.set_value(koi, 'pathways', " ".join(ko_entry['PATHWAY'].keys()))
+        except (KeyError, TypeError):
+            ko_pw_rea.set_value(koi, 'pathways', np.nan)
+
+        # try:
+        #     ko_pw_rea.set_value(koi, 'modules', " ".join(ko_entry['MODULE'].keys()))
+        # except (KeyError, ValueError):
+        #     ko_pw_rea.set_value(koi, 'modules', np.nan)
+        #
+        # try:
+        #     ko_pw_rea.set_value(koi, 'reactions', ko_entry['DBLINKS']['RN'])
+        # except KeyError:
+        #     ko_pw_rea.set_value(koi, 'reactions', np.nan)
+        #
+        # try:
+        #     ko_pw_rea.set_value(koi, 'go', ko_entry['DBLINKS']['GO'])
+        # except KeyError:
+        #     ko_pw_rea.set_value(koi, 'go', np.nan)
+
+    return ko_pw_rea
+
+
+df_wine_kos = pd.read_csv('../../data/ko_tables/chrats/wine/new/ko_taxfull_abund.csv',
+                          sep='\t',
+                          index_col=0).transpose()
+# convert to binary
+df_wine_kos[df_wine_kos > 0] = 1
+
+s = KEGG()
+
+test = df_wine_kos.copy()  # .iloc[0:30, :]
+
+test_res = map_pw_ko(s, test)
+
+test_res['taxonomy'] = [indi.split('_')[1] for indi in test_res.index]
+
+pw_count = pd.DataFrame()
+for target_tax in test_res['taxonomy'].unique():
+    temp_df = test_res.loc[test_res['taxonomy'] == target_tax].drop(['taxonomy', 'KO_id'], axis=1)
+    col_keep = [coli for coli in temp_df.columns if coli != 'pathways']
+
+    pw_count_temp = pd.DataFrame()
+    for coli in col_keep:
+        pw_temp = temp_df[temp_df[coli] == 1]['pathways']
+        col_temp = split_and_count(pw_temp, coli)
+        pw_count_temp = pd.concat([pw_count_temp, col_temp], axis=1)
+
+    pw_count_temp = pw_count_temp.transpose().add_suffix('_' + target_tax)
+    pw_count = pd.concat([pw_count, pw_count_temp.transpose()], axis=0)
+
+pw_count = get_number_kos_pw(s, pw_count)
+pw_count.drop('pw_id', axis=1).to_csv('../../data/ko_tables/chrats/wine/new/pw_enrichment_taxfull_abund.csv', index_col=0)
+
+sys.exit(0)
+
+target_tax = 'Vitis'
+
+temp_df = test_res.loc[test_res['taxonomy'] == target_tax].drop(['taxonomy', 'KO_id'], axis=1)
+
+col_keep = [coli for coli in temp_df.columns if coli != 'pathways']
+
+pw_count = pd.DataFrame()
+for coli in col_keep:
+    pw_temp = temp_df[temp_df[coli] == 1]['pathways']
+    col_temp = split_and_count(pw_temp, coli)
+    pw_count = pd.concat([pw_count, col_temp], axis=1)
+

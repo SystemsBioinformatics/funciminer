@@ -1,0 +1,157 @@
+import pandas as pd
+import os
+import glob
+import re
+import sys
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+def plotHeatmap(adf, fn, cmap=None):
+
+    # TODO: pass more arguments to function
+
+    # get the tick label font size
+    fontsize_pt = plt.rcParams['ytick.labelsize']
+    dpi = 72.27
+
+    # compute the matrix height in points and inches
+    matrix_height_pt = fontsize_pt * adf.shape[0]
+    matrix_height_in = matrix_height_pt / dpi
+
+    # compute the required figure height
+    top_margin = 0.04  # in percentage of the figure height
+    bottom_margin = 0.04 # in percentage of the figure height
+    figure_height = matrix_height_in / (1 - top_margin - bottom_margin)
+
+    # build the figure instance with the desired height
+    fig, ax = plt.subplots(
+            figsize=(30, figure_height),
+            gridspec_kw=dict(top=1-top_margin, bottom=bottom_margin))
+
+    # plot heatmap using seaborn
+    ax = sns.heatmap(adf, ax=ax, cmap=cmap)
+
+    for item in ax.get_yticklabels():
+        item.set_rotation(0)
+    for item in ax.get_xticklabels():
+        item.set_rotation(0)
+
+    # save the figure
+    plt.savefig(fn, dpi=100)
+    plt.close(fig)
+
+
+# all_dir = glob.glob("../../data/ko_tables/yoghurt/*ko.txt")
+# all_dir = glob.glob("../../data/ko_tables/chrats/*ko.txt")
+# all_dir = glob.glob("../../data/ko_tables/kefir/*.txt")
+# all_dir = glob.glob("../../data/ko_tables/chrats/Oeno_o/*_KO.txt")
+# all_dir = glob.glob("../../data/ko_tables/chrats/Lbrevis/*_KO.txt")
+all_dir = glob.glob("../../data/ko_tables/KO_lab_marc/*_KO.txt")
+
+df_all_kos = pd.DataFrame()
+
+# sys.exit(0)
+
+for kof in all_dir:
+
+    try:
+        inp = open(kof, 'r')
+
+    except IOError:
+        print 'File does not exist'
+
+    # read the KO table and assign names to columns
+    df_temp = pd.read_csv(inp, names=['pid', 'ko'], sep='\t', header=None)
+    # get rid of NAs
+    df_temp.dropna(inplace=True)
+    # count occurrences of KOs
+    ser_counts = df_temp['ko'].value_counts()
+    # create new data frame with counts
+    df_trans = pd.DataFrame(ser_counts).rename(columns={'ko': kof.rsplit('/', 2)[-1][:-7]}).transpose()
+    # concatenate dataframes; if KOs are not present, NAs will be introduced
+    df_all_kos = pd.concat([df_all_kos, df_trans], axis=0)
+
+# concat will lead to NAs if an organism does not have certain KOs; replace them by 0
+df_all_kos.fillna(0, inplace=True)
+# df_all_kos.transpose().to_csv('../../data/ko_tables/yoghurt/org_ko_counts.csv', index=True)
+# df_all_kos.transpose().to_csv('../../data/ko_tables/chrats/ko_counts.csv', index=True)
+# df_all_kos.transpose().to_csv('../../data/ko_tables/chrats/Lbrevis/ko_counts.csv', index=True)
+df_all_kos.transpose().to_csv('../../data/ko_tables/KO_lab_marc/ko_counts.csv', index=True)
+
+# binary representation
+df_kos_binary = df_all_kos.copy()
+df_kos_binary[df_kos_binary > 0] = 1
+df_kos_binary = df_kos_binary.T
+# df_kos_binary.to_csv('../../data/ko_tables/yoghurt/ko_binary.csv', index=True)
+# df_kos_binary.to_csv('../../data/ko_tables/chrats/ko_binary.csv', index=True)
+# df_kos_binary.to_csv('../../data/ko_tables/kefir/ko_binary.csv', index=True)
+# df_kos_binary.to_csv('../../data/ko_tables/chrats/Oeno_o/ko_binary.csv', index=True)
+# df_kos_binary.to_csv('../../data/ko_tables/chrats/Lbrevis/ko_binary.csv', index=True)
+df_kos_binary.to_csv('../../data/ko_tables/KO_lab_marc/ko_binary.csv', index=True)
+
+
+sys.exit(0)
+
+# replace IDs by actual names
+name_df = pd.read_excel('../../data/gb_fasta_files/kefir/Bacteria_isolates.xlsx')
+
+for coli in list(df_kos_binary):
+    # print 'column: '+coli
+    for entryi in name_df['Colony no.']:
+        # print 'entry: '+str(entryi)
+        if coli.startswith(str(entryi)+'_'):
+            # print 'entry string: '+str(entryi)+'_'
+            df_kos_binary.rename(columns={coli: name_df.Species[name_df['Colony no.'] == entryi].values.tolist()[0]},
+                                 inplace=True)
+
+df_kos_binary.to_csv('../../data/ko_tables/kefir/ko_binary_actual_names.csv', index=True)
+
+sys.exit(0)
+
+df_kos_binary = df_kos_binary.T
+# plotHeatmap(df_kos_binary, "org_ko_binary.png")
+
+# cm = sns.clustermap(df_kos_binary, col_cluster=False, metric='braycurtis', cmap='Greys')  #  'cosine'
+# hm = cm.ax_heatmap.get_position()
+# plt.setp(cm.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)  # , fontsize=6
+# cm.ax_heatmap.set_position([hm.x0*0.57, hm.y0, hm.width*1.05, hm.height*1.3])
+# # col = cm.ax_col_dendrogram.get_position()
+# # cm.ax_col_dendrogram.set_position([col.x0, col.y0, col.width*0.25, col.height*0.5])
+# row = cm.ax_row_dendrogram.get_position()
+# cm.ax_row_dendrogram.set_position([row.x0*0., row.y0, row.width*1, row.height*1.3])
+# plt.savefig("org_ko_binary_cluster.png")
+# plt.show()
+
+cm = sns.clustermap(df_kos_binary, col_cluster=False, metric='correlation', cmap='Greys')  #  'cosine'
+hm = cm.ax_heatmap.get_position()
+plt.setp(cm.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)  # , fontsize=6
+cm.ax_heatmap.set_position([hm.x0*0.57, hm.y0, hm.width*1.05, hm.height*1.3])
+# col = cm.ax_col_dendrogram.get_position()
+# cm.ax_col_dendrogram.set_position([col.x0, col.y0, col.width*0.25, col.height*0.5])
+row = cm.ax_row_dendrogram.get_position()
+cm.ax_row_dendrogram.set_position([row.x0*0., row.y0, row.width*1, row.height*1.3])
+# plt.savefig("org_ko_binary_cluster.png")
+plt.show()
+
+# df_all_kos_norm = df_all_kos.divide(df_all_kos.sum())
+#
+# plotHeatmap(df_all_kos_norm, "org_ko_counts.png")
+#
+# cm = sns.clustermap(df_all_kos_norm, col_cluster=False, metric='correlation', cmap='Greys')  # , cmap='jet')  #  'cosine'
+# hm = cm.ax_heatmap.get_position()
+# plt.setp(cm.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)  # , fontsize=6
+# cm.ax_heatmap.set_position([hm.x0, hm.y0, hm.width*1.05, hm.height*1.3])
+# # col = cm.ax_col_dendrogram.get_position()
+# # cm.ax_col_dendrogram.set_position([col.x0, col.y0, col.width*0.25, col.height*0.5])
+# row = cm.ax_row_dendrogram.get_position()
+# cm.ax_row_dendrogram.set_position([row.x0, row.y0, row.width*1, row.height*1.3])
+# # plt.savefig("org_ko_counts_cluster.png")
+# plt.show()
+
+
+
+# modules table
+# affinity propagation on similarity matrix (e.g. braycurtis) -> get representatives for each cluster
+# (N)MDS on similarity
+# tsne on both (binary, similarity)

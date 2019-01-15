@@ -1,0 +1,104 @@
+library("robCompositions", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.2")
+library("Rtsne", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.2")
+library("Biostrings")
+library(rgl)
+library(evd)
+library(scatterplot3d)
+library(apcluster)
+library(gridExtra)
+library(ShortRead)
+
+setwd("/media/chrats/Seagate3/wicrowine_samples/THLR_Tempranillo_maxbin/tank1_res_maxbin")
+setwd("/media/chrats/Seagate3/wicrowine_samples/7PVA_Bobal_idba/merged_all_bins/")
+setwd("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_idba/tank1plus_maxbin/")
+
+inp <- list.files(pattern = "*.fasta")
+counter<-1
+bin<-c()
+names_all<-c()
+All<-DNAStringSet()
+names<-list()
+data<-list()
+counterb<-1
+for (input in inp){
+  data[[counterb]]<-readFasta(input)
+  bin<-c(bin,rep(counter,length(data[[counterb]])))
+  counter<-counter+1
+  All<-c(All,data[[counterb]]@sread)
+  names_all<-c(names_all,as.character(data[[counterb]]@id))
+  names[[counterb]]<-as.character(data[[counterb]]@id)
+  counterb<-counterb+1
+}
+
+
+  bins.sum <- read.delim("/media/chrats/Seagate3/wicrowine_samples/7PVA_Bobal_idba/merged_all_bins/bins.summary")
+bins.sum <- read.delim("/media/chrats/Seagate3/wicrowine_samples/THLR_Tempranillo_maxbin/tank1_res_maxbin/bins.summary")
+bins.sum <- read.delim("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_idba/tank1plus_maxbin/bins.summary")
+
+
+colnames(bins.sum)[1]<-"Taxonomy"
+
+finaltax<-findtax("/media/chrats/Seagate3/wicrowine_samples/THLR_Tempranillo_maxbin/tank1_tax/tank1f.orfs.hmm.blast-ex.txt")
+finaltax<-findtax("/media/chrats/Seagate3/wicrowine_samples/7PVA_Bobal_idba/merged_all_bins_tax/bobal_final_assembly.orfs.hmm.blast-ex.txt")
+finaltax<-findtax("/media/chrats/Seagate3/wicrowine_samples/VECX_Airen_idba/tank1plus_tax/tank1plusf.orfs.hmm.blast-ex.txt")
+#
+bins.sum[,1]<-finaltax
+bins.sum<-bins.sum[rev(order(as.numeric(gsub("%","",bins.sum[,2])))),]
+kable(bins.sum,caption = "Summary of the tax",padding = 2)
+
+library(gtable)
+rownames(bins.sum)<-1:nrow(bins.sum)
+grid.table(bins.sum)
+
+
+findtax <-function(pathfile){
+  nom <- read.delim(pathfile, header=FALSE)
+  tax<-as.character(nom[,1])
+  tax_temp<-gsub('_([^_]*)$', "", tax)
+  nomsplit<-strsplit(as.character(nom$V2),";")
+  nenom<-c()
+  counter<-1
+  for(i in 1:length(nomsplit)){
+    if(length(nomsplit[[i]])<=3){
+      nomsplit[[i]]<-NA
+      tax_temp[i]<-NA
+    }else{
+      nenom[counter]<-nomsplit[[i]][9]
+      counter<-counter+1
+    }
+    
+  }
+  tax_temp<-tax_temp[ !is.na( tax_temp ) ]
+  #paste(sdata, collapse = '')
+  tax<-cbind(tax_temp,nenom)
+  
+  
+  abad_name_list<-list()
+  abad_tax_list<-list()
+  for (i in 1:length(names)){
+    # abad_id<-match(names[[i]], as.character(abad[,1]))
+    # abad_name_list[[i]]<-abad[abad_id,]
+    abad_id2<-match(names[[i]], as.character(tax[,1]))
+    abad_tax_list[[i]]<-tax[abad_id2,]
+  }
+  num_unq<-c()
+  final_tax<-c()
+  for (i in 1:length(names)){
+    temp<-table(abad_tax_list[[i]][,2])[table(abad_tax_list[[i]][,2])>0]
+    num_unq<-c(num_unq,length(temp))
+    if(length(temp)>0){
+      final_tax<-c(final_tax,names(temp[which.max(temp)]))
+    }else{
+      final_tax<-c(final_tax,"unclassified")
+    }
+    
+  }
+  
+  # splittax<-strsplit(final_tax,";")
+  # finaltax<-c()
+  # for (i in 1 : length(splittax)){
+  #   l<-length(splittax[[i]])
+  #   finaltax<-c(finaltax,splittax[[i]][l])
+  # }
+  finaltax<-final_tax
+}

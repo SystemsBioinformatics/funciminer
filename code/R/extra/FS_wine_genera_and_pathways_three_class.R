@@ -1,0 +1,63 @@
+#feature selection on genera abundance 
+data_genera<-read.table("/path/tax_of_kos_abund_lbpnorm.csv")
+
+
+
+#feature selection on pathway erichemen tax 
+read_data<-function(path){
+  data <- read.csv(path)
+  rownames(data)<-data[,1]
+  data<-data[,-1]
+  data<-t(data)
+  data
+}
+
+data_pw<-read_data("/path/pw_enrichment_taxfull_abund.csv")
+
+data<-data_pw
+data<-data[,!is.na(as.character(data[nrow(data),]))]
+
+pathways_norm<-apply(rbind(data[-nrow(data),],data[nrow(data),]), MARGIN = 2, function(x) x/x[length(x)]*100)
+pathways_norm<-pathways_norm[-nrow(pathways_norm),]
+#remove yeast
+t<-apply(pathways_norm,2,function(x) all(as.integer(names(table(x)))<=2))
+datar<-pathways_norm[,!t]
+class<-rep(2,nrow(datar))
+class[52:75]<-3
+class[1:24]<-1
+
+#########################remove lacto##########################################33
+#wine_full_pathwaysr_nolb<-datat_h_sd[,!gsub(".*_","",colnames(datat_h_sd))%in%"Lactobacillus"]
+##################
+library(Boruta)
+boruta.train.m_sqrt_path <- Boruta(x=as.data.frame(datar),y=as.factor(class), doTrace = 2,maxRuns = 5000,pValue = 0.01,holdHistory=T)
+
+boruta.train.m_fix<-TentativeRoughFix(boruta.train.m_sqrt_path)
+
+boruta.df.m.stats <- attStats(boruta.train.m_fix)
+
+boruta.df.m.conf<-boruta.df.m.stats[which(boruta.df.m.stats$decision == "Confirmed"),]
+#differenet between the 3 var
+path_tax_three_class<-datar[,match(rownames(boruta.df.m.conf),colnames(datar))]
+
+
+library(KEGGREST)
+templist<-list()
+# high l abund
+datat<-path_tax_three_class
+temp<-gsub("_.*","",colnames(datat))
+
+for (j in 1:length(temp)){
+  templist[[j]]<-keggGet(temp[j])
+}
+pathwaynames<-lapply(templist, function(x) x[[1]]$NAME)
+colnames(datat)<-paste(unlist(pathwaynames),gsub(".*_","",colnames(datat)),sep="-")
+
+
+library(apcluster)
+apres1<-apcluster(corSimMat(),t(datat),q=0.9)
+aggres2 <- aggExCluster(x=apres1)
+plot(aggres2)
+apres1<-apclusterK(corSimMat(),t(datat),K=4)
+library(lattice)
+levelplot (as.matrix(datat)[,unlist(apres1@clusters)], xlab="",ylab="",main="" ,col.regions = colorRampPalette(c("lightblue","blue","yellow","orange","red", "black")), aspect = "fill",scale=list(y=list(cex=.8),x=list(cex=1,rot=45)))

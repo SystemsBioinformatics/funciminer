@@ -1,0 +1,50 @@
+library(ShortRead)
+readFasta(input)
+
+folders<-c("7PVA_Bobal_maxbin_input","THLR_Tempranillo_maxbin_input","VECX_Airen_maxbin_input")
+total_genes_count<-list()
+count<-1
+names_list<-c()
+for(j in folders){
+  setwd(paste("/media/chrats/Seagate3/wicrowine_samples/",j,sep=""))
+  flist <- list.files(pattern = "*fa_folder$")
+  for(i in flist){
+    setwd(paste("/media/chrats/Seagate3/wicrowine_samples",j,i,sep="/"))
+    ffile <- list.files(pattern = ".*faa$")
+    read <- readAAStringSet(ffile)
+    
+    total_genes_count[[count]]<-length(read)
+    names_list<-c(names_list,ffile)
+    print(count)
+    count<-count+1
+  }
+}
+
+
+names(total_genes_count)<-clean_wine_wnames(names_list)
+total_genes_count<-unlist(total_genes_count)
+total_genes_count_ord<-(total_genes_count[match(names_ordered,names(total_genes_count))])
+total_seq<-totalread_persample_ord()/2
+#remove  sample from the analyis B7 all      A9_6
+#
+
+b7<-grep(pattern = "B7",names(total_genes_count))
+shapes<-rep(18,length(total_seq))
+shapes[52:75]<-20
+shapes[1:24]<-17
+shapes<-rep(18,length(total_seq))
+shapes[52:75]<-19
+shapes[1:24]<-17
+
+plot(log10(total_seq),log10(total_genes_count_ord),ylab="Log of the number of ORFs per sample",xlab="Log of paired-end reads per sample", pch=shapes, cex=2,col=col)
+legend("topleft",legend = c("Bobal","Tempranillo","Airen"),pch = c(17,18,19),cex=1.5)
+legend("bottomright",legend = c("<6.5",">7.5"), cex=1.5,col = c("blue","red"),pch=15)
+#smaller than 6.5
+temps<-which(log10(total_seq)<6.5)
+tempb<-which(log10(total_seq)>7.5)
+col<-rep("black",length(total_seq))
+col[temps]<-"blue"
+col[tempb]<-"red"
+text(log10(total_seq)[c(tempb)],log10(total_genes_count_ord)[c(tempb)], names(total_seq)[c(tempb)], cex=0.6, pos=4, col="red") 
+text(log10(total_seq)[c(temps)],log10(total_genes_count_ord)[c(temps)], names(total_seq)[c(temps)], cex=0.6, pos=3, col="blue") 
+

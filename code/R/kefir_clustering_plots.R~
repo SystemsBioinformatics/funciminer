@@ -1,0 +1,118 @@
+#produce kefir plots
+
+### read data ?
+read_data<-function(path){
+  data <- read.csv(path)
+  rownames(data)<-data[,1]
+  data<-data[,-1]
+  data<-t(data)
+  data
+}
+
+
+kefir_ko1<-read_data("/home/chrats/Desktop/From_genome_to_functions/from_genomes_to_function/data/ko_tables/kefir/ko_binary.csv")
+
+kefir_pathways<-read_data("/home/chrats/Desktop/From_genome_to_functions/from_genomes_to_function/data/ko_tables/kefir/pw_count_ko_numbers.csv")
+kefir_ko<-read_data("/home/chrats/Desktop/From_genome_to_functions/from_genomes_to_function/data/ko_tables/kefir/ko_binary_actual_names.csv")
+#remove unclomplete guy
+kefir_pathways<-kefir_pathways[-24,]
+kefir_ko<-kefir_ko[-24,]
+kefir_ko1<-kefir_ko1[-24,]
+#clustering kos
+
+library(apcluster)
+apres_kefir_ko<-apcluster(corSimMat(),kefir_ko, q=0.5,details =TRUE)
+apres_kefir_ko1<-apcluster(corSimMat(),kefir_ko1, q=0.5,details =TRUE)
+#heatmap(apres_kefir_ko,col=terrain.colors(12),dendScale=1,main="",cexRow=1.3,cexCol=0,Colv=NA,margins=c(5, 35,0))
+heatmap(apres_kefir_ko,col=terrain.colors(12),dendScale=1,main="",cexRow=1.3,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+#heatmap(apres_kefir_ko,col=terrain.colors(12),margins=c(5, 25,0),dendScale=.3,main="",cexRow=1.3,cexCol=0,Colv=NA)
+
+#####pathway clustering
+data<-kefir_pathways
+data<-data[,!is.na(as.character(data[nrow(data),]))]
+
+pathways_norm<-apply(rbind(data[-nrow(data),],data[nrow(data),]), MARGIN = 2, function(x) x/x[length(x)]*100)
+pathways_norm<-pathways_norm[-nrow(pathways_norm),]
+
+
+library(apcluster)
+apres_pathways_norm<-apclusterK(corSimMat(),pathways_norm,K=8)
+apres_pathways_nonorm<-apclusterK(corSimMat(),data[-nrow(data),],K=8)
+
+# apres_pathways_norm<-apcluster(corSimMat(),pathways_norm, q=0.5,details =TRUE)
+# apres_pathways_nonorm<-apcluster(corSimMat(),data[-nrow(data),], q=0.5,details =TRUE)
+heatmap(apres_pathways_norm,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+heatmap(apres_pathways_nonorm,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 10,0))
+
+heatmap(apres_pathways_norm,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 25,0))
+heatmap(apres_pathways_nonorm,col=terrain.colors(12),dendScale=1,main="",cexRow=1,cexCol=0,Colv=NA,,margins=c(5, 25,0))
+############### lactobasilus
+data_lac<-pathways_norm[c(4,5,7,13,29,33),]
+sd_path<-apply(data_lac, MARGIN = 2, function(x) sd(x))
+plot(sd_path)
+
+#datat_h_sd<-pathways_norm_exemp[, which(sd_path>mean(sd_path))]
+datat_h_sd<-data_lac[, which(sd_path>4)]
+
+
+library(KEGGREST)
+datat<-datat_h_sd
+templist<-list()
+for (j in 1:length(colnames(datat))){
+  templist[[j]]<-keggGet(colnames(datat)[j])
+}
+pathwaynames<-lapply(templist, function(x) x[[1]]$NAME)
+
+
+colnames(datat)<-unlist(pathwaynames)
+
+
+#ordering
+apres1<-apcluster(corSimMat(),t(datat),q=0.9)
+aggres2 <- aggExCluster(x=apres1)
+plot(aggres2)
+apres1<-apclusterK(corSimMat(),t(datat),K=3)
+#species
+apres<-apcluster(corSimMat(),datat,q=0.9)
+aggres <- aggExCluster(x=apres)
+plot(aggres)
+apres<-apclusterK(corSimMat(),datat,K=3)
+library("lattice", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.3")
+levelplot (datat[unlist(apres@clusters),unlist(apres1@clusters)], xlab="Species - exemplars",ylab="pathways",main="" ,col.regions = colorRampPalette(c("lightblue","blue", "yellow","orange","red", "black")), aspect = "fill",scale=list(y=list(cex=1),x=list(cex=1.5,rot=45)))
+
+
+####exemplars
+pathways_norm_exemp<-pathways_norm[apres_pathways_norm@exemplars,]
+sd_path<-apply(pathways_norm_exemp, MARGIN = 2, function(x) sd(x))
+plot(sd_path)
+
+#datat_h_sd<-pathways_norm_exemp[, which(sd_path>mean(sd_path))]
+datat_h_sd<-pathways_norm_exemp[, which(sd_path>10)]
+
+
+library(KEGGREST)
+datat<-datat_h_sd
+templist<-list()
+for (j in 1:length(colnames(datat))){
+  templist[[j]]<-keggGet(colnames(datat)[j])
+}
+pathwaynames<-lapply(templist, function(x) x[[1]]$NAME)
+
+
+colnames(datat)<-unlist(pathwaynames)
+
+
+#ordering
+apres1<-apcluster(corSimMat(),t(datat),q=0.9)
+aggres2 <- aggExCluster(x=apres1)
+plot(aggres2)
+apres1<-apclusterK(corSimMat(),t(datat),K=6)
+#species
+apres<-apcluster(corSimMat(),datat,q=0.9)
+aggres <- aggExCluster(x=apres)
+plot(aggres)
+apres<-apclusterK(corSimMat(),datat,K=3)
+library("lattice", lib.loc="~/R/x86_64-pc-linux-gnu-library/3.3")
+levelplot (datat[unlist(apres@clusters),unlist(apres1@clusters)], xlab="Species - exemplars",ylab="pathways",main="" ,col.regions = colorRampPalette(c("lightblue","blue", "yellow","orange","red", "black")), aspect = "fill",scale=list(y=list(cex=1),x=list(cex=1.5,rot=45)))
+
+
