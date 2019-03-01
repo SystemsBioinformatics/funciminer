@@ -1,0 +1,25 @@
+Bin Id	Marker lineage	# genomes	# markers	# marker sets	0	1	2	3	4	5+	Completeness	Contamination	Strain heterogeneity
+A_bins.002-Pseudomonas.syringae.group2	N/A (0)	-1	111	1	24	77	10	0	0	0	78.38	9.01	30.00
+A_bins.003-Lactobacillus.brevis	N/A (0)	-1	111	1	5	103	3	0	0	0	95.50	2.70	0.00
+A_bins.005-Pseudomonas.aeruginosa.group	N/A (0)	-1	111	1	14	95	2	0	0	0	87.39	1.80	100.00
+A_bins.006-Komagataeibacter.hansenii	N/A (0)	-1	111	1	20	41	41	9	0	0	81.98	53.15	13.24
+A_bins.007-Gluconobacter.oxydans	N/A (0)	-1	111	1	7	90	11	3	0	0	93.69	15.32	30.00
+A_bins.008-Gulbenkiania.mobilis	N/A (0)	-1	111	1	6	105	0	0	0	0	94.59	0.00	0.00
+A_bins.012-Oenococcus.oeni	N/A (0)	-1	111	1	9	99	3	0	0	0	91.89	2.70	0.00
+A_bins.014-Lactobacillus.plantarum	N/A (0)	-1	111	1	10	98	3	0	0	0	90.99	2.70	0.00
+A_bins.016-Sphingomonas.sp.FUKUSWIS1	N/A (0)	-1	111	1	25	81	5	0	0	0	77.48	4.50	60.00
+A_bins.017-Chryseobacterium	N/A (0)	-1	111	1	8	102	1	0	0	0	92.79	0.90	0.00
+A_bins.021-Pseudomonas.syringae.group1	N/A (0)	-1	111	1	21	49	33	6	0	2	81.08	50.45	21.35
+A_bins.023-Asaia.prunellae	N/A (0)	-1	111	1	31	47	22	6	2	3	72.07	49.55	22.45
+B_bins.003-Pseudomonas.syringae.group	N/A (0)	-1	111	1	6	105	0	0	0	0	94.59	0.00	0.00
+B_bins.004-Bradyrhizobium.sp.BTAi1	N/A (0)	-1	111	1	7	103	1	0	0	0	93.69	0.90	0.00
+B_bins.005-Lactobacillus.plantarum	N/A (0)	-1	111	1	27	82	2	0	0	0	75.68	1.80	0.00
+B_bins.006-Propionibacteriaceae	N/A (0)	-1	111	1	19	47	24	14	6	1	82.88	67.57	1.71
+B_bins.007-Rhodanobacter.sp.115	N/A (0)	-1	111	1	5	104	2	0	0	0	95.50	1.80	0.00
+B_bins.011-Oenococcus.oeni	N/A (0)	-1	111	1	6	103	2	0	0	0	94.59	1.80	0.00
+T_bins.003-Pseudomonas.syringae.group	N/A (0)	-1	111	1	7	104	0	0	0	0	93.69	0.00	0.00
+T_bins.005-Rhodanobacter.sp.115	N/A (0)	-1	111	1	5	104	2	0	0	0	95.50	1.80	0.00
+T_bins.006-Pseudoalteromonas.haloplanktis	N/A (0)	-1	111	1	8	101	2	0	0	0	92.79	1.80	0.00
+T_bins.009-Pezizomycotina	N/A (0)	-1	111	1	29	38	20	13	5	6	73.87	81.08	3.43
+T_bins.010-Oenococcus.oeni	N/A (0)	-1	111	1	7	103	1	0	0	0	93.69	0.90	0.00
+T_bins.013-Lactobacillus.plantarum	N/A (0)	-1	111	1	7	101	3	0	0	0	93.69	2.70	0.00
